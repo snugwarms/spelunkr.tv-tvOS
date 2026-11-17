@@ -68,7 +68,7 @@ This checklist tracks app requests and releases. Items are checked only when imp
 - [x] Retry a failing processed stream once with a fresh player and without the optional audio mix/custom speech tap, preserving stereo output, native subtitles, and the user's saved preferences. Make the temporary volume-leveling limitation visible.
 - [x] Cover Mandatory Viewing, Unpaid Programming, and Late Nite Local in the investigation; some other channels still play on the user's TV. Late Nite Local's sampled Holiday Special is H.264 Main level 3.0 / AAC-LC stereo; Unpaid Programming's sampled Country Collection is H.264 Main level 3.0 / HE-AAC stereo. Both pass the paused-startup/audio-processing/live-seek simulator check through the temporary relay. Direct hardware playback remains unconfirmed.
 - [x] Pass **35 Release core tests and 21 targeted Release simulator checks**: notification-only error handling, fresh-player compatibility recovery with advancing video frames, stale callback isolation, subtitle behavior, delayed startup, manual rewind, errors, and version display. Review the version-footer screenshot and validate the unsigned arm64 IPA, version 0.1.7 build 8; test fixtures and the relay are excluded.
-- [ ] Publish source and verified 0.1.7 release assets.
+- [x] Publish source and verified 0.1.7 release assets. [Version 0.1.7](https://github.com/snugwarms/spelunkr.tv-tvOS/releases/tag/v0.1.7) is live; GitHub's uploaded IPA digest matches the local SHA-256. Local IPA: `build/releases/0.1.7/Spelunkr-tvOS-unsigned.ipa`.
 - [ ] Confirm direct playback on the user's Apple TV and obtain the actual error code if the recovery workaround does not resolve the freeze.
 
 ## Preserve existing behavior
