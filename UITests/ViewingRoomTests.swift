@@ -77,6 +77,48 @@ final class ViewingRoomTests: XCTestCase {
         attach(app, "Automatic captions availability on this Apple TV")
     }
 
+    func testSubtitleSettingSurvivesClosingAndReopening() throws {
+        let app = XCUIApplication()
+        func openControls() {
+            let video = app.otherElements["videoRegion"]
+            XCTAssertTrue(video.waitForExistence(timeout: 15))
+            expectation(for: NSPredicate(format: "value == %@", "Playing"), evaluatedWith: video)
+            waitForExpectations(timeout: 60)
+            XCUIRemote.shared.press(.menu)
+            XCUIRemote.shared.press(.down)
+            XCTAssertTrue(app.cells.matching(NSPredicate(format: "label BEGINSWITH %@", "Subtitles:")).firstMatch.waitForExistence(timeout: 5))
+            XCTAssertEqual(app.cells.matching(NSPredicate(format: "label CONTAINS[c] %@", "subtitles")).count, 1)
+            XCTAssertFalse(app.cells["Automatic Captions"].exists)
+        }
+        func toggleSubtitles() {
+            let control = app.cells.matching(NSPredicate(format: "label BEGINSWITH %@", "Subtitles:")).firstMatch
+            XCUIRemote.shared.press(.up)
+            for _ in 0..<12 {
+                if control.hasFocus { break }
+                XCUIRemote.shared.press(.right)
+            }
+            XCTAssertTrue(control.hasFocus, app.debugDescription)
+            XCUIRemote.shared.press(.select)
+        }
+        app.launch()
+        openControls()
+        if app.cells["Subtitles: On"].exists { toggleSubtitles() }
+        XCTAssertTrue(app.cells["Subtitles: Off"].waitForExistence(timeout: 5))
+        toggleSubtitles()
+        XCTAssertTrue(app.cells["Subtitles: On"].waitForExistence(timeout: 5))
+        app.terminate()
+        app.launch()
+        openControls()
+        XCTAssertTrue(app.cells["Subtitles: On"].exists, "On must survive closing the app without a launch-argument override")
+        toggleSubtitles()
+        XCTAssertTrue(app.cells["Subtitles: Off"].waitForExistence(timeout: 5))
+        app.terminate()
+        app.launch()
+        openControls()
+        XCTAssertTrue(app.cells["Subtitles: Off"].exists, "An explicit Off choice must also survive closing the app")
+        attach(app, "Single subtitle control with persisted setting")
+    }
+
     func testGuideNavigationAndNativeControls() throws {
         let app = XCUIApplication()
         app.launch()
@@ -144,7 +186,7 @@ final class ViewingRoomTests: XCTestCase {
         XCTAssertTrue(live.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertTrue(app.cells["Last Channel"].exists)
         XCTAssertTrue(app.cells["Volume Leveling"].exists)
-        XCTAssertTrue(app.cells["Automatic Captions"].exists)
+        XCTAssertTrue(app.cells.matching(NSPredicate(format: "label BEGINSWITH %@", "Subtitles:")).firstMatch.exists)
         attach(app, "Native tvOS player controls")
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(live.waitForNonExistence(timeout: 5))

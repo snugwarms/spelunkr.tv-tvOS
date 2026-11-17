@@ -1,11 +1,11 @@
 import AVFoundation
 import Combine
 import Speech
-import SwiftUI
 
 @MainActor
 final class LiveCaptions: ObservableObject {
-    @Published private(set) var isEnabled = UserDefaults.standard.bool(forKey: "automaticCaptions")
+    @Published private(set) var isEnabled: Bool
+    @Published private(set) var usesNativeSubtitles = false
     @Published private(set) var text = ""
     @Published private(set) var status: String?
     @Published private(set) var lastTextAt = Date.distantPast
@@ -18,6 +18,18 @@ final class LiveCaptions: ObservableObject {
     private var isPlaybackReady = false
     private var nativeGroup: AVMediaSelectionGroup?
     private var nativeOption: AVMediaSelectionOption?
+    private let defaults: UserDefaults
+    private var preferredLanguage: String
+    private var preferredName: String?
+    private var prefersGenerated: Bool
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        isEnabled = defaults.bool(forKey: "automaticCaptions")
+        preferredLanguage = defaults.string(forKey: "subtitleLanguage") ?? "en"
+        preferredName = defaults.string(forKey: "subtitleName")
+        prefersGenerated = defaults.object(forKey: "subtitleGenerated") as? Bool ?? true
+    }
 
     var supportedOS: Bool {
         if #available(tvOS 26.0, *) { return true }
@@ -26,7 +38,7 @@ final class LiveCaptions: ObservableObject {
 
     func toggle() {
         isEnabled.toggle()
-        UserDefaults.standard.set(isEnabled, forKey: "automaticCaptions")
+        defaults.set(isEnabled, forKey: "automaticCaptions")
         restart()
     }
 
@@ -35,6 +47,8 @@ final class LiveCaptions: ObservableObject {
         stop()
         self.item = item
         isPlaybackReady = false
+        nativeGroup = nil
+        usesNativeSubtitles = false
     }
 
     func playbackReady() {
@@ -43,47 +57,69 @@ final class LiveCaptions: ObservableObject {
         restart()
     }
 
-    private func stop() {
+    /// AVKit calls this for user choices, including Off; app-driven selection does not persist a new choice.
+    func userSelected(_ option: AVMediaSelectionOption?, in group: AVMediaSelectionGroup) {
+        guard nativeGroup?.isEqual(group) == true || group.options.contains(where: { $0.hasMediaCharacteristic(.legible) }) else { return }
+        stop(deselectNative: false)
+        nativeGroup = group
+        nativeOption = option
+        usesNativeSubtitles = true
+        isEnabled = option != nil
+        defaults.set(isEnabled, forKey: "automaticCaptions")
+        if let option {
+            preferredLanguage = option.extendedLanguageTag ?? option.locale?.identifier ?? "en"
+            preferredName = option.displayName
+            prefersGenerated = isGenerated(option)
+            defaults.set(preferredLanguage, forKey: "subtitleLanguage")
+            defaults.set(preferredName, forKey: "subtitleName")
+            defaults.set(prefersGenerated, forKey: "subtitleGenerated")
+        }
+    }
+
+    private func stop(deselectNative: Bool = true) {
         generation = UUID()
         startTask?.cancel(); seekTask?.cancel()
         if let jumpObserver { NotificationCenter.default.removeObserver(jumpObserver) }
         jumpObserver = nil
         if let recognition, #available(tvOS 26.0, *), let session = recognition as? CaptionRecognitionSession { session.stop() }
         recognition = nil
-        if let item, let nativeGroup, let nativeOption,
+        if deselectNative, let item, let nativeGroup, let nativeOption,
            item.currentMediaSelection.selectedMediaOption(in: nativeGroup) === nativeOption {
             item.select(nil, in: nativeGroup)
         }
-        nativeGroup = nil; nativeOption = nil
+        nativeOption = nil
         text = ""; status = nil
     }
 
     private func restart() {
         stop()
-        guard isEnabled, isPlaybackReady, let item, item.status == .readyToPlay else { return }
-        guard #available(tvOS 26.0, *) else {
-            status = "Automatic captions require tvOS 26 or later."
-            return
-        }
+        guard isPlaybackReady, let item, item.status == .readyToPlay else { return }
         let token = generation
-        status = "Preparing automatic captions…"
+        status = isEnabled ? "Preparing subtitles…" : nil
         startTask = Task { [weak self] in
             guard let self else { return }
             do {
-                // tvOS 27 can expose on-device generated subtitles through normal AVKit selection.
-                // Prefer that native renderer; use the speech pipeline when no generated option exists.
-                if #available(tvOS 27.0, *), let group = try? await item.asset.loadMediaSelectionGroup(for: .legible) {
-                    let available = item.selectableMediaSelectionOptions(in: group)
-                    if let option = available.first(where: {
-                        $0.hasMediaCharacteristic(.machineGenerated) &&
-                        (($0.extendedLanguageTag?.lowercased().hasPrefix("en") ?? false) || $0.locale?.language.languageCode?.identifier == "en")
-                    }) {
-                        guard !Task.isCancelled, generation == token else { return }
-                        nativeGroup = group; nativeOption = option
-                        item.select(option, in: group)
-                        status = nil
-                        return
-                    }
+                // Discover native subtitles even when Off, so only one subtitle control is shown.
+                let group = try? await item.asset.loadMediaSelectionGroup(for: .legible)
+                try Task.checkCancellation()
+                guard generation == token else { return }
+                nativeGroup = group
+                let available: [AVMediaSelectionOption]
+                if let group, #available(tvOS 27.0, *) { available = item.selectableMediaSelectionOptions(in: group) }
+                else { available = group?.options ?? [] }
+                let options = available.filter { !$0.hasMediaCharacteristic(.containsOnlyForcedSubtitles) }
+                usesNativeSubtitles = !options.isEmpty
+                if let group, !options.isEmpty {
+                    let option = isEnabled ? preferredOption(in: options) : nil
+                    nativeOption = option
+                    item.select(option, in: group)
+                    status = nil
+                    return
+                }
+                guard isEnabled else { status = nil; return }
+                guard #available(tvOS 26.0, *) else {
+                    status = "Automatic captions require tvOS 26 or later."
+                    return
                 }
                 try Task.checkCancellation()
                 guard generation == token else { return }
@@ -112,6 +148,24 @@ final class LiveCaptions: ObservableObject {
                 status = error.localizedDescription
             }
         }
+    }
+
+    private func preferredOption(in options: [AVMediaSelectionOption]) -> AVMediaSelectionOption? {
+        func matchesLanguage(_ option: AVMediaSelectionOption) -> Bool {
+            let tag = option.extendedLanguageTag ?? option.locale?.identifier ?? ""
+            return tag.caseInsensitiveCompare(preferredLanguage) == .orderedSame ||
+                tag.split(whereSeparator: { $0 == "-" || $0 == "_" }).first?.lowercased() ==
+                preferredLanguage.split(whereSeparator: { $0 == "-" || $0 == "_" }).first?.lowercased()
+        }
+        return options.first { matchesLanguage($0) && $0.displayName == preferredName && isGenerated($0) == prefersGenerated }
+            ?? options.first { matchesLanguage($0) && isGenerated($0) == prefersGenerated }
+            ?? options.first(where: matchesLanguage)
+            ?? options.first
+    }
+
+    private func isGenerated(_ option: AVMediaSelectionOption) -> Bool {
+        if #available(tvOS 26.0, *) { return option.hasMediaCharacteristic(.machineGenerated) }
+        return false
     }
 
     private func restartAfterSeek() {
@@ -188,35 +242,5 @@ private final class CaptionRecognitionSession {
         audioTap = nil
         let analyzer = analyzer
         Task { await analyzer.cancelAndFinishNow() }
-    }
-}
-
-struct CaptionOverlay: View {
-    @ObservedObject var captions: LiveCaptions
-    @ObservedObject var community: CommunityPlayback
-    var body: some View {
-        GeometryReader { geometry in
-            let scale = max(0.35, min(1, geometry.size.width / 1440))
-            TimelineView(.periodic(from: .now, by: 0.25)) { context in
-                let recentText = context.date.timeIntervalSince(captions.lastTextAt) < 6 ? captions.text : ""
-                let value = !recentText.isEmpty ? recentText : captions.status ?? ""
-                if captions.isEnabled, !value.isEmpty {
-                    VStack {
-                        Spacer()
-                        Text(value)
-                            .accessibilityIdentifier("captionText")
-                            .font(.system(size: 29 * scale, weight: .semibold))
-                            .foregroundStyle(.white).multilineTextAlignment(.center).lineLimit(3)
-                            .padding(.horizontal, 18 * scale).padding(.vertical, 10 * scale)
-                            .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 7 * scale))
-                            .frame(maxWidth: geometry.size.width * 0.82)
-                            .padding(.bottom, (community.comments.isEmpty ? 50 : 230) * scale)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-            }
-        }
-        .allowsHitTesting(false)
-        .accessibilityLabel("Automatic captions")
     }
 }

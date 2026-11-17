@@ -35,6 +35,17 @@ for file in test_files:
     test_refs.append(ref)
     test_builds.append(obj('build:' + path, f'{{isa = PBXBuildFile; fileRef = {ref}; }}'))
 
+# Compile the real caption engine in the test runner to exercise native tracks without test hooks in the app.
+for path in ('App/LiveCaptions.swift', 'App/PlaybackAudioTap.swift'):
+    test_builds.append(obj('test-build:' + path, f'{{isa = PBXBuildFile; fileRef = {uid(path)}; }}'))
+test_resource_builds = []
+for file in sorted((root / 'UITests/Fixtures').glob('*')):
+    if not file.is_file(): continue
+    path = str(file.relative_to(root))
+    ref = obj(path, f'{{isa = PBXFileReference; lastKnownFileType = file; path = {quote(path)}; sourceTree = SOURCE_ROOT; }}')
+    test_refs.append(ref)
+    test_resource_builds.append(obj('build:' + path, f'{{isa = PBXBuildFile; fileRef = {ref}; }}'))
+
 asset_ref = obj('assets', '{isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = App/Assets.xcassets; sourceTree = SOURCE_ROOT; }')
 asset_build = obj('build:assets', f'{{isa = PBXBuildFile; fileRef = {asset_ref}; }}')
 product = obj('product', '{isa = PBXFileReference; explicitFileType = wrapper.application; path = Spelunkr.app; sourceTree = BUILT_PRODUCTS_DIR; }')
@@ -42,6 +53,7 @@ test_product = obj('test-product', '{isa = PBXFileReference; explicitFileType = 
 package = obj('package', '{isa = XCLocalSwiftPackageReference; relativePath = .; }')
 package_product = obj('package-product', f'{{isa = XCSwiftPackageProductDependency; package = {package}; productName = SpelunkrCore; }}')
 package_build = obj('package-build', f'{{isa = PBXBuildFile; productRef = {package_product}; }}')
+test_package_build = obj('test-package-build', f'{{isa = PBXBuildFile; productRef = {package_product}; }}')
 
 app_group = obj('app-group', f'{{isa = PBXGroup; name = App; children = {refs(file_refs + [asset_ref])}; sourceTree = "<group>"; }}')
 tests_group = obj('tests-group', f'{{isa = PBXGroup; name = UITests; children = {refs(test_refs)}; sourceTree = "<group>"; }}')
@@ -52,7 +64,8 @@ sources = obj('sources', f'{{isa = PBXSourcesBuildPhase; buildActionMask = 21474
 resources = obj('resources', f'{{isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = {refs([asset_build])}; runOnlyForDeploymentPostprocessing = 0; }}')
 frameworks = obj('frameworks', f'{{isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = {refs([package_build])}; runOnlyForDeploymentPostprocessing = 0; }}')
 test_sources = obj('test-sources', f'{{isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = {refs(test_builds)}; runOnlyForDeploymentPostprocessing = 0; }}')
-test_frameworks = obj('test-frameworks', '{isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; }')
+test_frameworks = obj('test-frameworks', f'{{isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = {refs([test_package_build])}; runOnlyForDeploymentPostprocessing = 0; }}')
+test_resources = obj('test-resources', f'{{isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = {refs(test_resource_builds)}; runOnlyForDeploymentPostprocessing = 0; }}')
 
 common = {
     'CLANG_ENABLE_MODULES': 'YES', 'SWIFT_VERSION': '5.0',
@@ -64,7 +77,7 @@ common = {
 }
 app_settings = {
     **common, 'PRODUCT_BUNDLE_IDENTIFIER': 'tv.spelunkr.community', 'PRODUCT_NAME': '$(TARGET_NAME)',
-    'MARKETING_VERSION': '0.1.3', 'CURRENT_PROJECT_VERSION': '4',
+    'MARKETING_VERSION': '0.1.4', 'CURRENT_PROJECT_VERSION': '5',
     'INFOPLIST_KEY_CFBundleDisplayName': 'Spelunkr',
     'INFOPLIST_FILE': 'App/Info.plist',
     'INFOPLIST_KEY_UILaunchScreen_Generation': 'YES', 'INFOPLIST_KEY_UIUserInterfaceStyle': 'Dark',
@@ -94,7 +107,7 @@ project_configs = configs('project', {'ALWAYS_SEARCH_USER_PATHS': 'NO', 'CLANG_E
 target = obj('app-target', f'{{isa = PBXNativeTarget; buildConfigurationList = {app_configs}; buildPhases = {refs([sources, frameworks, resources])}; buildRules = (); dependencies = (); name = Spelunkr; packageProductDependencies = {refs([package_product])}; productName = Spelunkr; productReference = {product}; productType = "com.apple.product-type.application"; }}')
 proxy = obj('target-proxy', f'{{isa = PBXContainerItemProxy; containerPortal = {uid("project")}; proxyType = 1; remoteGlobalIDString = {target}; remoteInfo = Spelunkr; }}')
 dependency = obj('test-dependency', f'{{isa = PBXTargetDependency; target = {target}; targetProxy = {proxy}; }}')
-test_target = obj('test-target', f'{{isa = PBXNativeTarget; buildConfigurationList = {test_configs}; buildPhases = {refs([test_sources, test_frameworks])}; buildRules = (); dependencies = {refs([dependency])}; name = SpelunkrUITests; productName = SpelunkrUITests; productReference = {test_product}; productType = "com.apple.product-type.bundle.ui-testing"; }}')
+test_target = obj('test-target', f'{{isa = PBXNativeTarget; buildConfigurationList = {test_configs}; buildPhases = {refs([test_sources, test_frameworks, test_resources])}; buildRules = (); dependencies = {refs([dependency])}; name = SpelunkrUITests; packageProductDependencies = {refs([package_product])}; productName = SpelunkrUITests; productReference = {test_product}; productType = "com.apple.product-type.bundle.ui-testing"; }}')
 project = obj('project', f'{{isa = PBXProject; attributes = {{BuildIndependentTargetsInParallel = YES; LastSwiftUpdateCheck = 2600; LastUpgradeCheck = 2600; TargetAttributes = {{{target} = {{CreatedOnToolsVersion = 26.0; }}; {test_target} = {{CreatedOnToolsVersion = 26.0; TestTargetID = {target}; }}; }}; }}; buildConfigurationList = {project_configs}; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = {main_group}; packageReferences = {refs([package])}; productRefGroup = {products_group}; projectDirPath = ""; projectRoot = ""; targets = {refs([target, test_target])}; }}')
 
 project_dir = root / 'Spelunkr.xcodeproj'

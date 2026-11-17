@@ -1,4 +1,5 @@
 import AVKit
+import Combine
 import SwiftUI
 import UIKit
 import OSLog
@@ -21,7 +22,14 @@ final class PlayerHostController: UIViewController, AVPlayerViewControllerDelega
     private var controlsVisible = false
     private var wasInteractive = false
     private var socialHost: UIHostingController<VideoOverlays>?
-    private var installedLastState: Bool?
+    private var captionObservation: AnyCancellable?
+    private struct MenuState: Equatable {
+        let canFlipBack: Bool
+        let normalizesVolume: Bool
+        let captionsEnabled: Bool
+        let nativeSubtitles: Bool
+    }
+    private var installedMenuState: MenuState?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -39,7 +47,15 @@ final class PlayerHostController: UIViewController, AVPlayerViewControllerDelega
 
     func configure(_ model: TVModel) {
         loadViewIfNeeded()
-        self.model = model
+        if self.model !== model {
+            self.model = model
+            captionObservation = model.captions.$usesNativeSubtitles.combineLatest(model.captions.$isEnabled)
+                .receive(on: RunLoop.main)
+                .sink { [weak self, weak model] _ in
+                    guard let model else { return }
+                    self?.updateTransportMenu(model)
+                }
+        }
         if socialHost == nil, let overlay = controller.contentOverlayView {
             let social = UIHostingController(rootView: VideoOverlays(model: model))
             social.view.backgroundColor = .clear
@@ -77,9 +93,15 @@ final class PlayerHostController: UIViewController, AVPlayerViewControllerDelega
                 }
             }
         }
-        if installedLastState != model.canFlipBack {
-            installedLastState = model.canFlipBack
-            controller.transportBarCustomMenuItems = [
+        updateTransportMenu(model)
+    }
+
+    private func updateTransportMenu(_ model: TVModel) {
+        let state = MenuState(canFlipBack: model.canFlipBack, normalizesVolume: model.normalizesVolume,
+                              captionsEnabled: model.captions.isEnabled, nativeSubtitles: model.captions.usesNativeSubtitles)
+        guard installedMenuState != state else { return }
+        installedMenuState = state
+        var items: [UIMenuElement] = [
             UIAction(title: "Rejoin Live", image: UIImage(systemName: "dot.radiowaves.left.and.right")) { [weak model] _ in model?.resumeLive() },
             UIAction(title: "Last Channel", image: UIImage(systemName: "arrow.left.arrow.right"), attributes: model.canFlipBack ? [] : [.disabled]) { [weak model] _ in model?.flipBack() },
             UIAction(title: "Mini Guide", image: UIImage(systemName: "list.bullet")) { [weak model] _ in model?.openMiniGuide() },
@@ -87,15 +109,21 @@ final class PlayerHostController: UIViewController, AVPlayerViewControllerDelega
             UIAction(title: "Volume Leveling", image: UIImage(systemName: "waveform"), state: model.normalizesVolume ? .on : .off) { [weak model] action in
                 model?.toggleNormalization()
                 action.state = model?.normalizesVolume == true ? .on : .off
-            },
-            UIAction(title: "Automatic Captions", image: UIImage(systemName: "captions.bubble"),
+            }
+        ]
+        if !model.captions.usesNativeSubtitles {
+            items.append(UIAction(title: model.captions.isEnabled ? "Subtitles: On" : "Subtitles: Off", image: UIImage(systemName: "captions.bubble"),
                       attributes: model.captions.supportedOS ? [] : [.disabled],
                       state: model.captions.isEnabled ? .on : .off) { [weak model] action in
                 model?.captions.toggle()
                 action.state = model?.captions.isEnabled == true ? .on : .off
-            }
-            ]
+            })
         }
+        controller.transportBarCustomMenuItems = items
+    }
+
+    func playerViewController(_ playerViewController: AVPlayerViewController, didSelect mediaSelectionOption: AVMediaSelectionOption?, in mediaSelectionGroup: AVMediaSelectionGroup) {
+        model?.captions.userSelected(mediaSelectionOption, in: mediaSelectionGroup)
     }
 
     override var preferredFocusEnvironments: [UIFocusEnvironment] { model?.showsNativeControls == true ? [controller] : [] }
