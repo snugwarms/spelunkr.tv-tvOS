@@ -9,7 +9,8 @@ let package = Package(
         .executable(name: "spelunkr-probe", targets: ["SpelunkrProbe"])
     ],
     targets: [
-        .target(name: "SpelunkrCore", resources: [.process("Resources")]),
+        .target(name: "CEBUR128", exclude: ["COPYING", "R128Scan-LICENSE.txt"], publicHeadersPath: "include"),
+        .target(name: "SpelunkrCore", dependencies: ["CEBUR128"], resources: [.process("Resources")]),
         .executableTarget(name: "SpelunkrProbe", dependencies: ["SpelunkrCore"], path: "Tools/SpelunkrProbe"),
         .testTarget(name: "SpelunkrCoreTests", dependencies: ["SpelunkrCore"], resources: [.process("Fixtures")])
     ]

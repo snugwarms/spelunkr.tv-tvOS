@@ -7,16 +7,35 @@ final class ClickWheelTests: XCTestCase {
         var clockwise = 0
         for index in 0...100 {
             let angle = -Double(index) * 2 * .pi / 100
-            clockwise += wheel.update(x: cos(angle), y: sin(angle))
+            clockwise += wheel.update(x: cos(angle), y: sin(angle), timestamp: Double(index) * 0.02)
         }
-        XCTAssertTrue((15...16).contains(clockwise))
+        XCTAssertTrue((5...6).contains(clockwise))
         wheel.reset()
         var counterclockwise = 0
         for index in 0...100 {
             let angle = Double(index) * 2 * .pi / 100
-            counterclockwise += wheel.update(x: cos(angle), y: sin(angle))
+            counterclockwise += wheel.update(x: cos(angle), y: sin(angle), timestamp: Double(index) * 0.02)
         }
-        XCTAssertTrue((-16 ... -15).contains(counterclockwise))
+        XCTAssertTrue((-6 ... -5).contains(counterclockwise))
+    }
+
+    func testAccelerationIsGentleAndFastInputCannotBurst() {
+        func scroll(duration: Double) -> [(Double, Int)] {
+            var wheel = ClickWheel(), steps: [(Double, Int)] = []
+            for index in 0...600 {
+                let time = Double(index) / 600 * duration
+                let angle = -Double(index) / 600 * 6 * .pi
+                let step = wheel.update(x: cos(angle), y: sin(angle), timestamp: time)
+                if step != 0 { steps.append((time, step)) }
+            }
+            return steps
+        }
+        let slow = scroll(duration: 12), quick = scroll(duration: 3), veryFast = scroll(duration: 1)
+        XCTAssertTrue((17...18).contains(slow.count))
+        XCTAssertGreaterThanOrEqual(quick.count, slow.count)
+        XCTAssertLessThanOrEqual(quick.count, slow.count + 4)
+        XCTAssertTrue(veryFast.allSatisfy { abs($0.1) == 1 })
+        for (previous, next) in zip(veryFast, veryFast.dropFirst()) { XCTAssertGreaterThanOrEqual(next.0 - previous.0, 0.109) }
     }
 
     func testStraightSwipesAndFingerLiftDoNotSpin() {

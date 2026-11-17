@@ -10,7 +10,8 @@ var SpelunkrTV = (() => {
         return {
             key: p.key, type: i.type, id: i.id || '',
             title: i.title || (i.type === 'ad' ? 'A word from the past' : i.type === 'up-next' ? 'Up next' : 'Station break'),
-            year: i.year == null ? '' : String(i.year), startMs: p.startMs, endMs: p.endMs
+            year: i.year == null ? '' : String(i.year), startMs: p.startMs, endMs: p.endMs,
+            synopsis: typeof i.description === 'string' ? i.description : typeof i.synopsis === 'string' ? i.synopsis : null
         };
     }
     return {

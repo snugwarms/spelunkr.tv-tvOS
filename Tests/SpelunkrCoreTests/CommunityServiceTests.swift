@@ -8,6 +8,7 @@ final class CommunityServiceTests: XCTestCase {
             let query = Dictionary(uniqueKeysWithValues: parts.queryItems!.map { ($0.name, $0.value ?? "") })
             XCTAssertEqual(request.httpMethod, "GET")
             XCTAssertEqual(query["video_id"], "eq.A # tape")
+            XCTAssertEqual(query["and"], "(timestamp_s.gte.0,timestamp_s.lt.600)")
             if request.url!.lastPathComponent == "comments" {
                 XCTAssertEqual(query["status"], "eq.active")
                 return Data("[{\"id\":\"c\",\"video_id\":\"A # tape\",\"timestamp_s\":12,\"text\":\"Great tape\",\"users\":{\"display_name\":\"Viewer\"}}]".utf8)
@@ -22,6 +23,43 @@ final class CommunityServiceTests: XCTestCase {
         XCTAssertEqual(result.reactions.count, 1)
         XCTAssertEqual(result.reactions.first?.symbol, "❤️")
     }
+
+    func testCachesTapeWindowAndDoesNotFetchDisabledOverlays() async throws {
+        let requests = CommunityRequestCounter()
+        CommunityMock.handler = { _ in requests.increment(); return Data("[]".utf8) }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CommunityMock.self]
+        let service = CommunityService(session: URLSession(configuration: config), minimumFetchInterval: 0)
+        _ = try await service.snapshot(videoID: "tape", position: 901)
+        _ = try await service.snapshot(videoID: "tape", position: 910)
+        XCTAssertEqual(requests.value, 2, "Repeated reads of the same tape window should use the cache")
+        _ = try await service.snapshot(videoID: "other", includeComments: false, includeReactions: false)
+        XCTAssertEqual(requests.value, 2)
+        _ = try await service.snapshot(videoID: "tape", position: 901, includeReactions: false)
+        XCTAssertEqual(requests.value, 3, "A disabled reaction overlay must not request the reactions endpoint")
+    }
+
+    func testDenseTapeWindowHasBoundedPagination() async throws {
+        let requests = CommunityRequestCounter()
+        CommunityMock.handler = { request in
+            requests.increment()
+            let row = "{\"id\":\"c\",\"timestamp_s\":20,\"text\":\"Tape comment\"}"
+            return Data(("[" + Array(repeating: row, count: 1000).joined(separator: ",") + "]").utf8)
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CommunityMock.self]
+        let service = CommunityService(session: URLSession(configuration: config), minimumFetchInterval: 0)
+        let result = try await service.snapshot(videoID: "tape", includeReactions: false)
+        XCTAssertEqual(requests.value, 2)
+        XCTAssertEqual(result.comments.count, 2000)
+    }
+}
+
+private final class CommunityRequestCounter {
+    private let lock = NSLock()
+    private var count = 0
+    func increment() { lock.lock(); count += 1; lock.unlock() }
+    var value: Int { lock.lock(); defer { lock.unlock() }; return count }
 }
 
 private final class CommunityMock: URLProtocol {

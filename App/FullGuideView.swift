@@ -7,11 +7,13 @@ private enum GuideFocus: Hashable {
 }
 
 struct FullGuideView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var model: TVModel
     @ObservedObject var wheel: RemoteWheel
     @FocusState private var focused: GuideFocus?
     @State private var repeatGate = NavigationRepeatGate()
     @StateObject private var arrows = GuideArrowInput()
+    @State private var needsOpeningFocus = true
     private let channelWidth: CGFloat = 300
     private let rowHeight: CGFloat = 94
 
@@ -77,7 +79,18 @@ struct FullGuideView: View {
                         if model.isLoadingSchedule { ProgressView("Loading schedule…").padding(24).background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 10)) }
                     }
                     .onChange(of: focused) { _, next in
-                        if case .program(let id, _) = next { proxy.scrollTo(id, anchor: .center) }
+                        if case .program(let id, _) = next {
+                            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { proxy.scrollTo(id, anchor: .center) }
+                        }
+                    }
+                    .task(id: model.isLoadingSchedule) {
+                        guard !model.isLoadingSchedule, needsOpeningFocus,
+                              let id = model.channel?.id ?? model.channels.first?.id else { return }
+                        proxy.scrollTo(id, anchor: .center)
+                        try? await Task.sleep(for: .milliseconds(60))
+                        guard !Task.isCancelled else { return }
+                        focusCurrentRow(force: true)
+                        needsOpeningFocus = false
                     }
                 }
                 .frame(maxHeight: .infinity)
@@ -100,14 +113,16 @@ struct FullGuideView: View {
         }, move: handleArrow))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("fullGuide")
-        .onChange(of: model.isLoadingSchedule) { _, loading in
-            if !loading { focusCurrentRow() }
+        .task(id: selection?.1.id) {
+            guard let program = selection?.1 else { return }
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            await model.loadSynopsis(for: program)
         }
         .onReceive(wheel.steps) { steps in
             guard model.showsSchedule else { return }
             for _ in 0..<min(10, abs(steps)) { moveVertical(steps > 0 ? 1 : -1) }
         }
-        .task { if !model.isLoadingSchedule { focusCurrentRow() } }
     }
 
     private var selection: (Channel, Program)? {
@@ -120,7 +135,7 @@ struct FullGuideView: View {
     }
 
     private var details: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(selection.map { "CH \($0.0.number)  \($0.0.name)" } ?? "SPELUNKR")
                     .font(.system(size: 23, weight: .bold, design: .monospaced)).foregroundStyle(.cyan)
@@ -131,7 +146,7 @@ struct FullGuideView: View {
                 }.foregroundStyle(.white.opacity(0.7))
             }
             Text(selection?.1.title ?? "The guide is coming in…")
-                .font(.system(size: 40, weight: .bold)).foregroundStyle(.white).lineLimit(2)
+                .font(.system(size: 36, weight: .bold)).foregroundStyle(.white).lineLimit(2)
                 .accessibilityIdentifier("guideSelectedProgram")
             if let (_, program) = selection {
                 HStack(spacing: 15) {
@@ -143,8 +158,13 @@ struct FullGuideView: View {
                 }
                 .font(.system(size: 23, weight: .medium, design: .monospaced)).foregroundStyle(.cyan)
             }
-            Text(selection?.0.description ?? "Browse channels and the next two hours of programming. The current channel keeps playing in the corner.")
-                .font(.system(size: 24)).lineSpacing(5).foregroundStyle(.white.opacity(0.82)).lineLimit(3)
+            if let (_, program) = selection,
+               let synopsis = model.synopsis(for: program), !synopsis.isEmpty {
+                Text(synopsis).font(.system(size: 21)).lineSpacing(3).foregroundStyle(.white.opacity(0.9)).lineLimit(3)
+                    .accessibilityIdentifier("guideTapeSynopsis")
+            }
+            Text(selection?.0.description ?? "Browse channels and the next two hours of programming.")
+                .font(.system(size: 15)).lineSpacing(2).foregroundStyle(.white.opacity(0.65)).lineLimit(2)
             Spacer(minLength: 0)
         }
     }
@@ -152,7 +172,8 @@ struct FullGuideView: View {
     private func channelLabel(_ channel: Channel) -> some View {
         HStack(spacing: 14) {
             Text(channel.number).font(.system(size: 29, weight: .black, design: .monospaced))
-                .frame(width: 48, alignment: .leading)
+                .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                .frame(width: 66, alignment: .leading)
             ChannelIcon(channel: channel).frame(width: 32, height: 32)
             VStack(alignment: .leading, spacing: 6) {
                 Text(channel.name).font(.system(size: 19, weight: .bold, design: .monospaced)).lineLimit(2)
@@ -160,7 +181,7 @@ struct FullGuideView: View {
             }
             Spacer(minLength: 6)
         }
-        .padding(.leading, 15).padding(.trailing, 12)
+        .padding(.leading, 2).padding(.trailing, 12)
         .foregroundStyle(channel.id == model.channel?.id ? .cyan : .white)
         .background(Color(red: 0.03, green: 0.12, blue: 0.29))
     }
@@ -200,6 +221,7 @@ struct FullGuideView: View {
                         }
                     }
                     .accessibilityIdentifier("schedule-\(channel.id)-\(index)")
+                    .accessibilityValue(program.start <= Date() && program.end > Date() ? "On now" : program.start > Date() ? "Upcoming" : "Earlier")
                     .accessibilityLabel("\(channel.name), \(program.title), \(program.start.formatted(date: .omitted, time: .shortened)). Select to tune channel live.")
                 }
             }
@@ -208,10 +230,11 @@ struct FullGuideView: View {
         .clipped()
     }
 
-    private func focusCurrentRow() {
-        if case .program(let id, let key) = focused, model.schedule[id]?.contains(where: { $0.key == key }) == true { return }
-        let channel = selection?.0 ?? model.channel ?? model.channels.first
-        if let channel, let program = model.schedule[channel.id]?.first { focused = .program(channel.id, program.key) }
+    private func focusCurrentRow(force: Bool = false) {
+        if !force, case .program(let id, let key) = focused, model.schedule[id]?.contains(where: { $0.key == key }) == true { return }
+        let channel = force ? model.channel ?? model.channels.first : selection?.0 ?? model.channel ?? model.channels.first
+        let now = Date()
+        if let channel, let program = model.schedule[channel.id]?.first(where: { $0.start <= now && $0.end > now }) ?? model.schedule[channel.id]?.first { focused = .program(channel.id, program.key) }
         else { focused = .watch }
     }
 
@@ -249,7 +272,9 @@ struct FullGuideView: View {
         if row == 0 && step < 0 { focused = .now; return }
         let nextRow = max(0, min(model.channels.count - 1, row + step))
         let channel = model.channels[nextRow]
-        let time = max(model.scheduleStart, selected.1.start).addingTimeInterval(1)
+        let now = Date()
+        let time = model.scheduleStart <= now && now < model.scheduleStart.addingTimeInterval(7200)
+            ? now : max(model.scheduleStart, selected.1.start).addingTimeInterval(1)
         if let program = model.schedule[channel.id]?.first(where: { $0.start <= time && $0.end > time }) ?? model.schedule[channel.id]?.first {
             focused = .program(channel.id, program.key)
         }

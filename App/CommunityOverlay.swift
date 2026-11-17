@@ -29,7 +29,7 @@ final class CommunityPlayback: ObservableObject {
     @Published var showsReactions: Bool {
         didSet { UserDefaults.standard.set(showsReactions, forKey: "showVideoReactions") }
     }
-    private let service = CommunityService()
+    private let service = CommunityService(session: NetworkAudit.session)
     private var fetchTask: Task<Void, Never>?
     private var tickTask: Task<Void, Never>?
     private var videoID: String?
@@ -57,25 +57,39 @@ final class CommunityPlayback: ObservableObject {
         comments = []; reactions = []; error = nil; knownComments = []
         guard let videoID else { return }
         fetchTask = Task { [weak self] in
+            var failures = 0
+            var nextFetchAt = Date.distantPast
+            var requestedBucket: Int?
             while !Task.isCancelled {
                 guard let self else { return }
+                guard showsComments || showsReactions, let position = clock(), position.isFinite else {
+                    try? await Task.sleep(for: .seconds(1))
+                    continue
+                }
+                let bucket = Int(floor(max(0, position) / 300))
+                let outsideWindow = requestedBucket.map { position < Double(max(0, $0 * 300 - 120)) || position >= Double($0 * 300 + 600) } ?? false
+                guard Date() >= nextFetchAt || outsideWindow else {
+                    try? await Task.sleep(for: .seconds(1))
+                    continue
+                }
+                requestedBucket = bucket
                 do {
-                    let next = try await service.snapshot(videoID: videoID)
+                    let next = try await service.snapshot(videoID: videoID, position: position, includeComments: showsComments, includeReactions: showsReactions)
                     guard !Task.isCancelled, self.videoID == videoID else { return }
-                    if snapshot != nil, let position = clock() {
-                        // Newly arriving live reactions float immediately, as on the website.
-                        for item in next.reactions.filter({ !self.knownReactions.contains($0.id) && abs($0.timestamp_s - position) <= 120 }).suffix(12) { float(item) }
-                        for item in next.comments where !knownComments.contains(item.id) && item.timestamp_s <= position && position - item.timestamp_s <= 20 { show(item) }
-                    } else { lastPosition = clock().map { max(0, $0 - 3) } }
+                    if snapshot == nil { lastPosition = clock() }
                     knownReactions.formUnion(next.reactions.map(\.id))
                     knownComments.formUnion(next.comments.map(\.id))
                     snapshot = next
                     error = nil
+                    failures = 0
                 } catch {
                     guard !Task.isCancelled else { return }
                     self.error = "Comments and reactions are temporarily unavailable."
+                    failures += 1
                 }
-                try? await Task.sleep(for: .seconds(15))
+                let delay = min(300, NetworkPolicy.communityRefreshInterval * pow(2, Double(min(3, failures))))
+                nextFetchAt = Date().addingTimeInterval(delay)
+                try? await Task.sleep(for: .seconds(1))
             }
         }
         tickTask = Task { [weak self] in
@@ -91,13 +105,13 @@ final class CommunityPlayback: ObservableObject {
         comments.removeAll { now.timeIntervalSince($0.born) > 12 }
         reactions.removeAll { now.timeIntervalSince($0.born) > 6 }
         guard let position = clock(), position.isFinite, let snapshot else { return }
-        let previous = lastPosition ?? max(0, position - 2)
+        let previous = lastPosition ?? position
         if position < previous - 1 {
             // Rewinding re-arms the tape's later comments and reactions.
             displayed.subtract(snapshot.comments.filter { $0.timestamp_s > position }.map(\.id))
             displayed.subtract(snapshot.reactions.filter { $0.timestamp_s > position }.map(\.id))
         }
-        let lower = position < previous || position - previous > 5 ? position - 2 : previous
+        let lower = position < previous || position - previous > 5 ? position : previous
         lastPosition = position
         for comment in snapshot.comments where comment.timestamp_s > lower && comment.timestamp_s <= position && !displayed.contains(comment.id) {
             show(comment)

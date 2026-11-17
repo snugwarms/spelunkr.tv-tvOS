@@ -22,9 +22,10 @@ final class RemoteWheel: ObservableObject {
             configured.insert(ObjectIdentifier(controller))
             pad.reportsAbsoluteDpadValues = true
             pad.dpad.valueChangedHandler = { [weak self] _, x, y in
+                let timestamp = ProcessInfo.processInfo.systemUptime
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    let value = wheel.update(x: Double(x), y: Double(y))
+                    let value = wheel.update(x: Double(x), y: Double(y), timestamp: timestamp)
                     if value != 0 { steps.send(value) }
                 }
             }

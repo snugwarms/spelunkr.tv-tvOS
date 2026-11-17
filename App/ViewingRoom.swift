@@ -7,6 +7,7 @@ struct ViewingRoom: View {
     @StateObject private var model = TVModel()
     @StateObject private var wheel = RemoteWheel()
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focus: RoomFocus?
 
     var body: some View {
@@ -67,7 +68,10 @@ struct ViewingRoom: View {
             let index = rows.firstIndex(where: { $0.id == current }) ?? 0
             focus = .channel(rows[max(0, min(rows.count - 1, index + step))].id)
         }
-        .onChange(of: scenePhase) { _, phase in model.setActive(phase == .active) }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { model.setActive(false) }
+            else if phase == .active { model.setActive(true) }
+        }
         .task { await model.start() }
         .sheet(isPresented: $model.showsAbout) { about }
     }
@@ -156,10 +160,16 @@ struct ViewingRoom: View {
                 }
                 .scrollIndicators(.hidden)
                 .onChange(of: focus) { _, next in
-                    if case .channel(let id) = next { proxy.scrollTo(id, anchor: .center) }
+                    if case .channel(let id) = next {
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { proxy.scrollTo(id, anchor: .center) }
+                    }
                 }
-                .onChange(of: model.showsSidebar) { _, visible in
-                    if visible, let id = model.channel?.id { proxy.scrollTo(id, anchor: .center) }
+                .task(id: model.channel?.id) {
+                    guard let id = model.channel?.id else { return }
+                    proxy.scrollTo(id, anchor: .center)
+                    try? await Task.sleep(for: .milliseconds(60))
+                    guard !Task.isCancelled, model.showsSidebar else { return }
+                    focus = .channel(id)
                 }
             }
             .frame(maxHeight: .infinity)
@@ -209,6 +219,7 @@ struct ViewingRoom: View {
                 Spacer()
                 if let channel = model.channel {
                     Text("CH \(channel.number)").font(.system(size: 15, weight: .bold, design: .monospaced))
+                        .accessibilityIdentifier("nowPlayingChannelNumber")
                 }
             }.foregroundStyle(Palette.cyan)
             Text(model.channel?.name ?? "TUNING THE DIAL")
@@ -220,6 +231,13 @@ struct ViewingRoom: View {
                 .foregroundStyle(.white)
                 .frame(height: 60, alignment: .topLeading)
                 .accessibilityIdentifier("nowPlayingProgram")
+            if let synopsis = model.playback?.synopsis, !synopsis.isEmpty {
+                Text(synopsis).font(.system(size: 17)).foregroundStyle(.white.opacity(0.86)).lineLimit(4)
+                    .accessibilityIdentifier("nowPlayingSynopsis")
+            }
+            if let description = model.channel?.description {
+                Text(description).font(.system(size: 13)).foregroundStyle(Palette.muted).lineLimit(2)
+            }
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 if let program = model.playback?.plan.program {
                     ProgressView(value: program.progress(at: context.date)).tint(Palette.cyan)
@@ -236,7 +254,7 @@ struct ViewingRoom: View {
     private var about: some View {
         VStack(alignment: .leading, spacing: 28) {
             Text("SPELUNKR ON APPLE TV").font(.system(size: 38, weight: .black, design: .monospaced)).foregroundStyle(Palette.yellow)
-            Text("An independent Apple TV client for spelunkr.tv. Programming, broadcast schedules, and the original scheduler belong to Spelunkr. Videos stream directly from the Internet Archive.")
+            Text("UNOFFICIAL third-party Apple TV app. Not made by, affiliated with, or endorsed by the creator of Spelunkr.tv. Programming, broadcast schedules, and the original scheduler belong to Spelunkr. Videos stream directly from the Internet Archive.")
             Text("Right opens the mini guide; Right again opens the full schedule. Back steps back through the guides to the video. Left and Right in the full guide browse earlier and later programs. Hold Select on a mini-guide channel to manage favorites.")
             Text("Up, Down or Select while watching opens the native tvOS player controls, with Rejoin Live and Last Channel. Play/Pause works on the remote. Rewinding is allowed; playing ahead of live is not.")
             Text("Comments pop up at the bottom left when their saved timestamp on the tape comes around again. The site's yellow reactions float up over the picture. The speech-bubble menu toggles either overlay.")
@@ -262,15 +280,16 @@ private struct ChannelButton: View {
 
     var body: some View {
         Button(action: tune) {
-            HStack(alignment: .top, spacing: 13) {
+            HStack(alignment: .top, spacing: 10) {
                 VStack(spacing: 7) {
                     Text(channel.number).font(.system(size: 25, weight: .black, design: .monospaced))
+                        .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                     ChannelIcon(channel: channel).frame(width: 32, height: 32)
                     if isPlaying { Image(systemName: "speaker.wave.2.fill").font(.system(size: 14)) }
                     else if isFavorite { Image(systemName: "star.fill").font(.system(size: 14)) }
                 }
                 .foregroundStyle(isPlaying ? Palette.cyan : Palette.muted)
-                .frame(width: 38)
+                .frame(width: 52)
                 VStack(alignment: .leading, spacing: 7) {
                     Text(channel.name).font(.system(size: 17, weight: .bold, design: .monospaced))
                         .foregroundStyle(isPlaying ? Palette.cyan : .white).lineLimit(1).minimumScaleFactor(0.75)
@@ -284,7 +303,7 @@ private struct ChannelButton: View {
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 14).padding(.vertical, 15)
+            .padding(.leading, 4).padding(.trailing, 14).padding(.vertical, 15)
             .frame(maxWidth: .infinity, minHeight: 105, alignment: .leading)
         }
         .buttonStyle(ChannelButtonStyle(isPlaying: isPlaying))

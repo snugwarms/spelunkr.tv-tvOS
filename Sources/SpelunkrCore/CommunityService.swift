@@ -30,31 +30,52 @@ public struct CommunitySnapshot: Sendable {
 public actor CommunityService {
     private struct Configuration: Decodable { let url: URL; let publicKey: String }
     private let session: URLSession
-    public init(session: URLSession = .shared) { self.session = session }
+    private struct CacheEntry { let at: Date; let snapshot: CommunitySnapshot }
+    private var cache: [String: CacheEntry] = [:]
+    private let minimumFetchInterval: TimeInterval
+    private var lastFetchAt = Date.distantPast
+    public init(session: URLSession = .shared, minimumFetchInterval: TimeInterval = NetworkPolicy.communityMinimumFetchInterval) {
+        self.session = session; self.minimumFetchInterval = minimumFetchInterval
+    }
 
-    public func snapshot(videoID: String) async throws -> CommunitySnapshot {
+    public func snapshot(videoID: String, position: Double = 0, includeComments: Bool = true, includeReactions: Bool = true) async throws -> CommunitySnapshot {
         guard !videoID.isEmpty else { return CommunitySnapshot(comments: [], reactions: []) }
+        guard includeComments || includeReactions else { return CommunitySnapshot(comments: [], reactions: []) }
+        let bucket = Int(floor(max(0, position.isFinite ? position : 0) / 300)) * 300
+        let lower = max(0, bucket - 120), upper = bucket + 600
+        let key = "\(videoID):\(bucket):\(includeComments):\(includeReactions)"
+        if let saved = cache[key], Date().timeIntervalSince(saved.at) < NetworkPolicy.communityRefreshInterval { return saved.snapshot }
+        while Date().timeIntervalSince(lastFetchAt) < minimumFetchInterval {
+            try await Task.sleep(for: .seconds(minimumFetchInterval - Date().timeIntervalSince(lastFetchAt)))
+        }
+        try Task.checkCancellation()
+        lastFetchAt = Date()
         let configURL = Bundle.module.url(forResource: "community", withExtension: "json")!
         let config = try JSONDecoder().decode(Configuration.self, from: Data(contentsOf: configURL))
-        async let comments: [VideoComment] = pages(table: "comments", config: config, query: [
+        let window = "(timestamp_s.gte.\(lower),timestamp_s.lt.\(upper))"
+        async let comments: [VideoComment] = pages(table: "comments", config: config, enabled: includeComments, query: [
             "select": "id,video_id,timestamp_s,text,users:user_cards!comments_user_id_fkey(display_name)",
-            "video_id": "eq.\(videoID)", "status": "eq.active", "order": "timestamp_s.asc,id.asc"
+            "video_id": "eq.\(videoID)", "status": "eq.active", "order": "timestamp_s.asc,id.asc", "and": window
         ])
-        async let reactions: [VideoReaction] = pages(table: "reactions", config: config, query: [
-            "select": "id,video_id,timestamp_s,emoji", "video_id": "eq.\(videoID)", "order": "id.asc"
+        async let reactions: [VideoReaction] = pages(table: "reactions", config: config, enabled: includeReactions, query: [
+            "select": "id,video_id,timestamp_s,emoji", "video_id": "eq.\(videoID)", "order": "timestamp_s.asc,id.asc", "and": window
         ])
         let result = try await CommunitySnapshot(comments: comments, reactions: reactions)
-        return CommunitySnapshot(
+        let filtered = CommunitySnapshot(
             comments: result.comments.filter { $0.timestamp_s.isFinite && !$0.text.isEmpty },
             reactions: result.reactions.filter { $0.timestamp_s.isFinite && ["laugh", "skull", "shocked", "fire", "question", "sad", "heart"].contains($0.emoji) }
         )
+        if cache.count >= 24, let oldest = cache.min(by: { $0.value.at < $1.value.at })?.key { cache[oldest] = nil }
+        cache[key] = CacheEntry(at: Date(), snapshot: filtered)
+        return filtered
     }
 
-    private func pages<T: Decodable>(table: String, config: Configuration, query: [String: String]) async throws -> [T] {
+    private func pages<T: Decodable>(table: String, config: Configuration, enabled: Bool, query: [String: String]) async throws -> [T] {
+        guard enabled else { return [] }
         var rows: [T] = []
-        for page in 0..<20 {
+        for page in 0..<NetworkPolicy.communityMaximumPages {
             var parts = URLComponents(url: config.url.appendingPathComponent(table), resolvingAgainstBaseURL: false)!
-            parts.queryItems = (query.merging(["limit": "1000", "offset": String(page * 1000)]) { a, _ in a })
+            parts.queryItems = (query.merging(["limit": String(NetworkPolicy.communityPageSize), "offset": String(page * NetworkPolicy.communityPageSize)]) { a, _ in a })
                 .sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
             var request = URLRequest(url: parts.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
             request.setValue(config.publicKey, forHTTPHeaderField: "apikey")
@@ -65,7 +86,7 @@ public actor CommunityService {
             }
             let batch = try JSONDecoder().decode([T].self, from: data)
             rows.append(contentsOf: batch)
-            if batch.count < 1000 { break }
+            if batch.count < NetworkPolicy.communityPageSize { break }
         }
         return rows
     }

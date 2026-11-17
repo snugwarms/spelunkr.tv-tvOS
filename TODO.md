@@ -11,17 +11,20 @@ This checklist tracks requests for version 0.1.2. Items are checked only when im
 
 ## Version 0.1.2
 
-- [ ] Restore automatic captions on top of the startup fix. Prefer native tvOS generated subtitles when available; start speech processing only after the video is ready. Initial caption-enabled Release checks passed; final audio integration remains.
-- [ ] Publish a network report with measured request counts, destinations, cold startup, warm reopen, ongoing polling, media traffic, and limitations.
-- [ ] Reduce server load: five-minute lineup checks, one-minute community checks, HTTP caching, capped concurrent requests, bounded tape-time queries, cached community windows, and no polling for disabled overlays. Implemented; final audit and validation remain.
-- [ ] Slow circular/iPod scrolling and use a gentler acceleration curve. Implemented; simulated touch-trace tests pass; real Siri Remote feel still needs confirmation.
-- [ ] Add smooth, fast guide scrolling, respecting Reduce Motion. Implemented; final visual review remains.
-- [ ] Rejoin live and start playing whenever the app is reopened or returns from the background, even after pausing. State reset implemented; reopen test is being completed.
-- [ ] Show the tape synopsis at the top of the mini guide and in the full guide; make the channel description smaller. Use already-loaded metadata to avoid requests on every focus change. Implemented; final verification remains.
-- [ ] Reduce loud bumper music through **universal LUFS normalization** for tapes, ads, and bumpers. Use a real loudness meter, bounded gain, and peak protection; share audio processing with captions. The initial fixed bumper reduction is superseded by this request.
-- [ ] Open both mini guide and full guide on the currently playing channel and bring it into view.
-- [ ] When scrolling vertically on the full guide's current-time page, select the program airing now on each destination channel instead of its leftmost program.
-- [ ] Keep three-digit channel numbers on one line and move their column slightly left in both guides.
+- [x] Restore automatic captions on top of the startup fix. Prefer native tvOS generated subtitles when available; start speech processing only after the video is ready. The shared audio path and caption availability passed Release checks; actual transcription remains a hardware check.
+- [x] Publish a network report with measured request counts, destinations, cold startup, warm reopen, ongoing polling, media traffic, and limitations. **Leave the report unchanged from this point, per the user's latest instruction.** The app's final polling setting is five minutes.
+- [x] Reduce server load: **five-minute lineup, comment, and reaction checks**, HTTP caching, capped concurrent requests, bounded tape-time queries, cached community windows, and no polling for disabled overlays. Five-minute community polling is the user's latest request, replacing the earlier one-minute plan. Implemented and checked; published report remains unchanged as requested.
+- [x] Slow circular/iPod scrolling and use a gentler acceleration curve. Implemented; simulated touch-trace tests pass; real Siri Remote feel still needs confirmation.
+- [x] Add smooth, fast guide scrolling, respecting Reduce Motion. Implemented and visually reviewed.
+- [x] Rejoin live and start playing whenever the app is reopened or returns from the background, even after pausing. Verified by pause/background-return and cold-reopen Release checks.
+- [x] Keep video/audio playing while the OS Quick Settings/Control Center is open; do not pause or retune merely because the scene is temporarily inactive.
+- [x] Show the tape synopsis at the top of the mini guide and in the full guide; make the channel description smaller. Cache summaries; only fetch missing Internet Archive metadata after focus has settled for a second. No description requests go to Spelunkr's server. Implemented and checked in the guides.
+- [x] Reduce loud bumper music through **universal LUFS normalization** for tapes, ads, and bumpers. Use a real loudness meter, bounded gain, and peak protection; share audio processing with captions. The initial fixed bumper reduction is superseded by this request.
+- [x] Enforce stereo output/downmixing and disable audio spatialization for videos and bumper music, including AirPods playback; do this silently.
+- [x] Keep delay introduced by volume leveling below five seconds, within the user's five-to-ten-second ceiling. Keep reaction/comment presentation locked to the displayed tape timestamp; remove early/late “show immediately” reaction behavior. A read-only capability probe succeeded; no push subscription is shipped. The app follows the requested five-minute polling policy.
+- [x] Open both mini guide and full guide on the currently playing channel and bring it into view.
+- [x] When scrolling vertically on the full guide's current-time page, select the program airing now on each destination channel instead of its leftmost program.
+- [x] Keep three-digit channel numbers on one line and move their column slightly left in both guides.
 - [ ] Run the final optimized core and simulator checks, build the 0.1.2 IPA, verify its contents, publish source and release assets, and provide the local IPA path.
 
 ## Preserve existing behavior
@@ -34,4 +37,4 @@ This checklist tracks requests for version 0.1.2. Items are checked only when im
 ## Hardware confirmation
 
 - [ ] Confirm the replacement no longer crashes on the user's Apple TV 4K third generation / tvOS 27.2 after Signulous installation.
-- [ ] Confirm physical-device captions, normalization, circular-scrolling feel, and playback after reopening. Simulator checks alone do not establish these results.
+- [ ] Confirm physical-device captions, normalization, AirPods stereo output, circular-scrolling feel, and playback after reopening. Simulator checks alone do not establish these results.

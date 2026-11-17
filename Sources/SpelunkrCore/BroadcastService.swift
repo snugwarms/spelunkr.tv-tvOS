@@ -1,6 +1,7 @@
 import Foundation
 
 public actor BroadcastService {
+    private static let requestLimiter = BroadcastRequestLimiter()
     public static let roots = [URL(string: "https://data.spelunkr.tv/")!, URL(string: "https://spelunkr.tv/broadcast/")!]
     private let session: URLSession
     private let roots: [URL]
@@ -21,12 +22,12 @@ public actor BroadcastService {
     }
 
     public func lineup(force: Bool = false) async throws -> Lineup {
-        if !force, let lineupData, Date().timeIntervalSince(lineupAt) < 60 { return lineupData }
+        if !force, let lineupData, Date().timeIntervalSince(lineupAt) < NetworkPolicy.lineupRefreshInterval { return lineupData }
         var lastError: Error = BroadcastError.invalidData("The broadcast guide is unavailable.")
         // Retry the live host on each refresh even when the previous refresh used a snapshot.
         for root in roots {
             do {
-                let data = try await request(root.appendingPathComponent("lineup.json"))
+                let data = try await Self.fetch(root.appendingPathComponent("lineup.json"), session: session, policy: .reloadRevalidatingCacheData)
                 let lineup = try JSONDecoder().decode(Lineup.self, from: data)
                 guard lineup.engine <= 5 else { throw BroadcastError.unsupportedEngine(lineup.engine) }
                 guard !lineup.availableChannels.isEmpty else { throw BroadcastError.invalidData("The broadcast guide is empty.") }
@@ -73,7 +74,8 @@ public actor BroadcastService {
                 audioURL = base.appendingPathComponent(filename)
             }
         }
-        return ResolvedPlayback(plan: plan, mediaURL: mediaURL, fallbackURL: fallbackURL, audioURL: audioURL)
+        return ResolvedPlayback(plan: plan, mediaURL: mediaURL, fallbackURL: fallbackURL, audioURL: audioURL,
+                                synopsis: plan.program.synopsis ?? plan.archiveID.flatMap { metadata[$0]?.synopsis })
     }
 
     private func engine() throws -> ScheduleEngine {
@@ -129,10 +131,19 @@ public actor BroadcastService {
 
     private func request(_ url: URL) async throws -> Data { try await Self.fetch(url, session: session) }
 
-    private static func fetch(_ url: URL, session: URLSession) async throws -> Data {
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 12)
+    private static func fetch(_ url: URL, session: URLSession, policy: URLRequest.CachePolicy = .useProtocolCachePolicy) async throws -> Data {
+        var request = URLRequest(url: url, cachePolicy: policy, timeoutInterval: 12)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
+        await requestLimiter.acquire()
+        let data: Data, response: URLResponse
+        do {
+            try Task.checkCancellation()
+            (data, response) = try await session.data(for: request)
+            await requestLimiter.release()
+        } catch {
+            await requestLimiter.release()
+            throw error
+        }
         guard let response = response as? HTTPURLResponse else { throw BroadcastError.invalidData("Invalid server response.") }
         guard (200..<300).contains(response.statusCode) else { throw BroadcastError.http(response.statusCode) }
         return data
@@ -158,9 +169,26 @@ public actor BroadcastService {
         if let info, let direct = info.directURL(file: filename) { return (direct, redirect) }
         return (redirect, nil)
     }
+
+    public func tapeSynopsis(id: String) async throws -> String? {
+        if let saved = metadata[id] { return saved.synopsis }
+        let url = URL(string: "https://archive.org/metadata/")!.appendingPathComponent(id)
+        let value = try JSONDecoder().decode(ArchiveMetadata.self, from: await request(url))
+        if metadata.count > 80 { metadata.removeAll(keepingCapacity: true) }
+        metadata[id] = value
+        return value.synopsis
+    }
 }
 
 struct ArchiveMetadata: Decodable {
+    struct DescriptiveMetadata: Decodable {
+        let description: String?
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            description = (try? values.decode(String.self, forKey: .description)) ?? (try? values.decode([String].self, forKey: .description).joined(separator: " "))
+        }
+        private enum CodingKeys: String, CodingKey { case description }
+    }
     struct File: Decodable { let name: String; let format: String? }
     struct Location: Decodable { let server: String?; let dir: String? }
     struct Alternate: Decodable { let servers: [Location]? }
@@ -169,6 +197,19 @@ struct ArchiveMetadata: Decodable {
     let dir: String?
     let files: [File]?
     let alternate_locations: Alternate?
+    let metadata: DescriptiveMetadata?
+    var synopsis: String? {
+        guard let raw = metadata?.description else { return nil }
+        let text = raw.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        return text.isEmpty ? nil : text
+    }
 
     func directURL(file: String) -> URL? {
         let alternate = alternate_locations?.servers?.first

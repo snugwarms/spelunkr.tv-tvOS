@@ -1,6 +1,82 @@
 import XCTest
 
 final class ViewingRoomTests: XCTestCase {
+    func testQuickSettingsDoesNotPausePlayback() throws {
+        let app = XCUIApplication()
+        app.launch()
+        let video = app.otherElements["videoRegion"]
+        XCTAssertTrue(video.waitForExistence(timeout: 15))
+        expectation(for: NSPredicate(format: "value == %@", "Playing"), evaluatedWith: video)
+        waitForExpectations(timeout: 60)
+        XCUIRemote.shared.press(.home, forDuration: 1.2)
+        attach(app, "Playback while Quick Settings is open")
+        XCTAssertEqual(video.value as? String, "Playing")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertEqual(video.value as? String, "Playing")
+    }
+
+    func testThreeDigitNumbersAndGuideOpeningFocus() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-lastChannel", "dusty-trails"]
+        app.launch()
+        let number = app.staticTexts["nowPlayingChannelNumber"]
+        expectation(for: NSPredicate(format: "label == %@", "CH 100"), evaluatedWith: number)
+        waitForExpectations(timeout: 45)
+        let current = app.buttons["channel-dusty-trails"]
+        XCTAssertTrue(current.waitForExistence(timeout: 5))
+        XCTAssertTrue(current.hasFocus)
+        let digits = current.staticTexts["100"]
+        XCTAssertLessThan(digits.frame.height, 40, "Three-digit channel numbers must remain one line")
+        attach(app, "Three-digit mini-guide channel")
+        XCUIRemote.shared.press(.right)
+        let full = app.staticTexts["PROGRAM GUIDE"]
+        XCTAssertTrue(full.waitForExistence(timeout: 5))
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "CH 100"), evaluatedWith: app.staticTexts["guideSelectedChannel"])
+        waitForExpectations(timeout: 30)
+        XCTAssertTrue(app.staticTexts["100"].firstMatch.exists)
+        attach(app, "Full guide opening on the playing three-digit channel")
+    }
+
+    func testReturningToAppResumesLiveAfterPause() throws {
+        let app = XCUIApplication()
+        app.launch()
+        let video = app.otherElements["videoRegion"]
+        XCTAssertTrue(video.waitForExistence(timeout: 15))
+        expectation(for: NSPredicate(format: "value == %@", "Playing"), evaluatedWith: video)
+        waitForExpectations(timeout: 60)
+        XCUIRemote.shared.press(.playPause)
+        expectation(for: NSPredicate(format: "value == %@", "Paused"), evaluatedWith: video)
+        waitForExpectations(timeout: 5)
+        XCUIRemote.shared.press(.home)
+        if !app.wait(for: .runningBackground, timeout: 3), app.state == .runningForeground {
+            XCUIApplication(bundleIdentifier: "com.apple.TVSettings").activate()
+        }
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5) || app.wait(for: .runningBackgroundSuspended, timeout: 5))
+        app.activate()
+        expectation(for: NSPredicate(format: "value == %@", "Playing"), evaluatedWith: video)
+        waitForExpectations(timeout: 60)
+        app.terminate()
+        app.launch()
+        expectation(for: NSPredicate(format: "value == %@", "Playing"), evaluatedWith: video)
+        waitForExpectations(timeout: 60)
+    }
+
+    func testAutomaticCaptionsKeepVideoPlaying() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-automaticCaptions", "YES"]
+        app.launch()
+        let video = app.otherElements["videoRegion"]
+        XCTAssertTrue(video.waitForExistence(timeout: 15))
+        expectation(for: NSPredicate(format: "value == %@", "Playing"), evaluatedWith: video)
+        waitForExpectations(timeout: 60)
+        XCUIRemote.shared.press(.menu)
+        let text = app.staticTexts["captionText"]
+        XCTAssertTrue(text.waitForExistence(timeout: 45), "Speech setup or an availability explanation should appear on the simulator")
+        XCTAssertFalse(text.label.isEmpty)
+        XCTAssertEqual(video.value as? String, "Playing", "Speech setup must not interrupt playback")
+        attach(app, "Automatic captions availability on this Apple TV")
+    }
+
     func testGuideNavigationAndNativeControls() throws {
         let app = XCUIApplication()
         app.launch()
@@ -61,7 +137,8 @@ final class ViewingRoomTests: XCTestCase {
         let live = app.cells["Rejoin Live"]
         XCTAssertTrue(live.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertTrue(app.cells["Last Channel"].exists)
-        XCTAssertFalse(app.cells["Automatic Captions"].exists)
+        XCTAssertTrue(app.cells["Volume Leveling"].exists)
+        XCTAssertTrue(app.cells["Automatic Captions"].exists)
         attach(app, "Native tvOS player controls")
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(live.waitForNonExistence(timeout: 5))
@@ -83,10 +160,13 @@ final class ViewingRoomTests: XCTestCase {
         waitForExpectations(timeout: 45)
         let initial = channelName.label
         let targetID = initial == "HAPPY TREES" ? "computer-chronicles" : "happy-trees"
+        let currentNumber = Int(app.staticTexts["nowPlayingChannelNumber"].label.split(separator: " ").last ?? "0") ?? 0
+        let targetNumber = targetID == "happy-trees" ? 12 : 13
+        let direction: XCUIRemote.Button = targetNumber > currentNumber ? .down : .up
         let target = app.buttons["channel-\(targetID)"]
-        for _ in 0..<20 {
+        for _ in 0..<45 {
             if target.exists && target.hasFocus { break }
-            XCUIRemote.shared.press(.down)
+            XCUIRemote.shared.press(direction)
         }
         XCTAssertTrue(target.hasFocus)
         XCTAssertEqual(channelName.label, initial, "Browsing must not retune")

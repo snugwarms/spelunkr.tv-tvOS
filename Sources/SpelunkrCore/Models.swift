@@ -52,6 +52,7 @@ public struct Program: Codable, Hashable, Sendable {
     public let id: String
     public let title: String
     public let year: String
+    public let synopsis: String?
     public let startMs: Double
     public let endMs: Double
     public var start: Date { Date(timeIntervalSince1970: startMs / 1000) }
@@ -102,6 +103,7 @@ public struct ResolvedPlayback: Sendable {
     public let mediaURL: URL?
     public let fallbackURL: URL?
     public let audioURL: URL?
+    public let synopsis: String?
 }
 
 public enum BroadcastError: LocalizedError {

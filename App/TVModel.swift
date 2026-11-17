@@ -22,8 +22,11 @@ final class TVModel: ObservableObject {
     private let logger = Logger(subsystem: "tv.spelunkr.community", category: "playback")
     let player = AVPlayer()
     let community = CommunityPlayback()
+    let captions = LiveCaptions()
+    @Published private(set) var normalizesVolume = UserDefaults.standard.object(forKey: "normalizesVolume") as? Bool ?? true
+    private var playbackAudioTap: PlaybackAudioTap?
     private let audioPlayer = AVPlayer()
-    private let service = BroadcastService()
+    private let service = BroadcastService(session: NetworkAudit.session)
     @Published private(set) var channels: [Channel] = []
     @Published private(set) var guide: [String: GuideEntry] = [:]
     @Published private(set) var channelErrors: [String: String] = [:]
@@ -44,6 +47,8 @@ final class TVModel: ObservableObject {
     }
     @Published private(set) var videoAspectRatio: CGFloat = 4 / 3
     @Published private(set) var schedule: [String: [Program]] = [:]
+    @Published private var tapeSynopses: [String: String] = [:]
+    private var synopsisAttempts: [String: Date] = [:]
     @Published private(set) var scheduleStart = Date()
     @Published private(set) var isLoadingSchedule = false
     private var scheduleRequest = UUID()
@@ -58,6 +63,7 @@ final class TVModel: ObservableObject {
     private var watchdogTask: Task<Void, Never>?
     private var statusObservation: NSKeyValueObservation?
     private var controlObservation: NSKeyValueObservation?
+    private var audioRouteObservation: NSObjectProtocol?
     private var endedObservation: NSObjectProtocol?
     private var failedObservation: NSObjectProtocol?
     private var generation = UUID()
@@ -85,6 +91,9 @@ final class TVModel: ObservableObject {
         commands.nextTrackCommand.addTarget { [weak self] _ in Task { @MainActor [weak self] in self?.surf(1) }; return .success }
         commands.previousTrackCommand.addTarget { [weak self] _ in Task { @MainActor [weak self] in self?.surf(-1) }; return .success }
         commands.changePlaybackPositionCommand.isEnabled = false
+        audioRouteObservation = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.configureStereoOutput() }
+        }
     }
 
     var orderedChannels: [Channel] {
@@ -118,15 +127,20 @@ final class TVModel: ObservableObject {
             let at = Date(), service = service
             // A failed channel keeps its row and retries at the next refresh.
             await withTaskGroup(of: GuideLoadResult.self) { group in
-                for entry in channels {
+                var pending = channels.makeIterator()
+                func enqueue(_ entry: Channel) {
                     group.addTask {
                         do { return GuideLoadResult(id: entry.id, entry: try await service.guide(channel: entry, at: at), error: nil) }
                         catch { return GuideLoadResult(id: entry.id, entry: nil, error: error.localizedDescription) }
                     }
                 }
+                for _ in 0..<NetworkPolicy.concurrentGuideLoads {
+                    if let entry = pending.next() { enqueue(entry) }
+                }
                 for await result in group {
                     if let entry = result.entry { guide[result.id] = entry; channelErrors[result.id] = nil }
                     else { channelErrors[result.id] = result.error }
+                    if let entry = pending.next() { enqueue(entry) }
                 }
             }
             if let current = channel {
@@ -153,6 +167,8 @@ final class TVModel: ObservableObject {
         }
         if resetRetry { retryCount = 0 }
         player.pause(); audioPlayer.pause()
+        captions.bind(nil)
+        playbackAudioTap?.stop(); playbackAudioTap = nil
         player.replaceCurrentItem(with: nil); audioPlayer.replaceCurrentItem(with: nil)
         clearObservers()
         playback = nil; error = nil; isTuning = true; usedFallback = false
@@ -165,6 +181,7 @@ final class TVModel: ObservableObject {
                 // Metadata or a slow network can cross a station-break boundary.
                 guard resolved.plan.program.end > Date() else { tune(selected); return }
                 playback = resolved
+                if let synopsis = resolved.synopsis { tapeSynopses[resolved.plan.program.id] = synopsis }
                 community.watch(videoID: resolved.plan.program.type == "video" ? resolved.plan.archiveID : nil,
                                 sessionKey: "\(selected.id):\(resolved.plan.program.key)") { [weak self] in
                     guard let self, !isPaused, player.timeControlStatus == .playing else { return nil }
@@ -189,6 +206,7 @@ final class TVModel: ObservableObject {
     private func installVideo(_ url: URL, token: UUID) {
         clearObservers()
         let item = AVPlayerItem(url: url)
+        item.allowedAudioSpatializationFormats = []
         if let plan = playback?.plan {
             let title = AVMutableMetadataItem()
             title.identifier = .commonIdentifierTitle
@@ -200,12 +218,15 @@ final class TVModel: ObservableObject {
         }
         item.preferredForwardBufferDuration = 8
         player.replaceCurrentItem(with: item)
+        captions.bind(item)
         isBuffering = true
         statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             Task { @MainActor [weak self] in
                 guard let self, generation == token, player.currentItem === item else { return }
                 switch item.status {
                 case .readyToPlay:
+                    await prepareAudioProcessing(item, token: token)
+                    guard generation == token, foreground else { return }
                     let size = item.presentationSize
                     if size.height > 0 { videoAspectRatio = size.width / size.height }
                     guard let plan = playback?.plan else { return }
@@ -216,7 +237,7 @@ final class TVModel: ObservableObject {
                             guard let self, generation == token, completed, foreground else { return }
                             isBuffering = false; error = nil; watchdogTask?.cancel()
                             internalPlayerChange = false
-                            if !isPaused { player.play() }
+                            if !isPaused { player.play(); captions.playbackReady() }
                         }
                     }
                 case .failed: videoFailed(token: token)
@@ -274,10 +295,13 @@ final class TVModel: ObservableObject {
 
     private func installAudio(_ url: URL, token: UUID) {
         let item = AVPlayerItem(url: url)
+        item.allowedAudioSpatializationFormats = []
         audioPlayer.replaceCurrentItem(with: item)
         statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             Task { @MainActor [weak self] in
                 guard let self, generation == token, item.status == .readyToPlay, let plan = playback?.plan else { return }
+                await prepareAudioProcessing(item, token: token)
+                guard generation == token, foreground else { return }
                 audioPlayer.seek(to: CMTime(seconds: plan.audioInPoint + plan.offset(at: Date()), preferredTimescale: 1000)) { [weak self] done in
                     Task { @MainActor [weak self] in
                         guard let self, generation == token, done, !isPaused, foreground else { return }
@@ -308,9 +332,22 @@ final class TVModel: ObservableObject {
     }
 
     func togglePause() { isPaused ? resumePlayback() : pause() }
+    func toggleNormalization() {
+        normalizesVolume.toggle()
+        UserDefaults.standard.set(normalizesVolume, forKey: "normalizesVolume")
+        playbackAudioTap?.setNormalization(normalizesVolume)
+    }
+    private func prepareAudioProcessing(_ item: AVPlayerItem, token: UUID) async {
+        do {
+            let tap = try await PlaybackAudioTap.shared(for: item)
+            guard generation == token else { tap.stop(); return }
+            playbackAudioTap = tap
+            tap.setNormalization(normalizesVolume)
+        } catch { logger.error("Could not start audio processing: \(error.localizedDescription, privacy: .public)") }
+    }
     func resumePlayback() {
         isPaused = false
-        if playback?.plan.isVideo == true { player.play() }
+        if playback?.plan.isVideo == true { player.play(); captions.playbackReady() }
         else { audioPlayer.play() }
         MPNowPlayingInfoCenter.default().playbackState = .playing
     }
@@ -342,9 +379,11 @@ final class TVModel: ObservableObject {
         UserDefaults.standard.set(favoriteIDs.sorted(), forKey: "favoriteChannels")
     }
     func setActive(_ active: Bool) {
-        logger.debug("App active: \(active)")
+        guard foreground != active else { return }
+        logger.notice("App active: \(active)")
         foreground = active
         if active {
+            isPaused = false
             configureAudio()
             if let channel { tune(channel) }
             startRefreshLoop()
@@ -352,6 +391,7 @@ final class TVModel: ObservableObject {
             generation = UUID()
             tuneTask?.cancel(); transitionTask?.cancel(); recoveryTask?.cancel(); watchdogTask?.cancel(); refreshTask?.cancel()
             player.pause(); audioPlayer.pause()
+            captions.bind(nil)
             community.watch(videoID: nil, clock: { nil })
         }
     }
@@ -359,7 +399,7 @@ final class TVModel: ObservableObject {
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(60))
+                try? await Task.sleep(for: .seconds(NetworkPolicy.lineupRefreshInterval))
                 guard !Task.isCancelled, let self, foreground else { return }
                 await refresh()
             }
@@ -368,6 +408,14 @@ final class TVModel: ObservableObject {
     private func configureAudio() {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
         try? AVAudioSession.sharedInstance().setActive(true)
+        configureStereoOutput()
+    }
+    private func configureStereoOutput() {
+        let session = AVAudioSession.sharedInstance()
+        if session.supportsMultichannelContent { try? session.setSupportsMultichannelContent(false) }
+        if session.maximumOutputNumberOfChannels >= 2, session.preferredOutputNumberOfChannels != 2 {
+            try? session.setPreferredOutputNumberOfChannels(2)
+        }
     }
     private func setNowPlaying() {
         guard let playback, let channel else { return }
@@ -386,6 +434,7 @@ final class TVModel: ObservableObject {
     }
 
     private func enforceLiveBoundary() {
+        NetworkAudit.shared.recordMedia(player.currentItem ?? audioPlayer.currentItem, audio: NetworkAudit.shared.enabled ? playbackAudioTap?.statistics : nil)
         guard foreground, !isTuning, !internalPlayerChange, let plan = playback?.plan,
               plan.isVideo, player.currentItem?.status == .readyToPlay else { return }
         let position = player.currentTime().seconds
@@ -405,6 +454,13 @@ final class TVModel: ObservableObject {
     }
 
     var guideVisible: Bool { showsSidebar || showsSchedule }
+    func synopsis(for program: Program) -> String? { program.synopsis ?? tapeSynopses[program.id] }
+    func loadSynopsis(for program: Program) async {
+        guard program.type == "video", synopsis(for: program) == nil,
+              Date().timeIntervalSince(synopsisAttempts[program.id] ?? .distantPast) >= 300 else { return }
+        synopsisAttempts[program.id] = Date()
+        if let value = try? await service.tapeSynopsis(id: program.id) { tapeSynopses[program.id] = value }
+    }
     func openMiniGuide() { showsSchedule = false; showsSidebar = true; showsNativeControls = false }
     func openFullGuide() {
         showsSidebar = false; showsSchedule = true
@@ -426,13 +482,20 @@ final class TVModel: ObservableObject {
         var rows: [String: [Program]] = [:]
         let service = service
         await withTaskGroup(of: ScheduleLoadResult.self) { group in
-            for channel in channels {
+            var pending = channels.makeIterator()
+            func enqueue(_ channel: Channel) {
                 group.addTask {
                     let programs = (try? await service.timeline(channel: channel, start: at, end: at.addingTimeInterval(7200))) ?? []
                     return ScheduleLoadResult(id: channel.id, programs: programs)
                 }
             }
-            for await result in group { rows[result.id] = result.programs }
+            for _ in 0..<NetworkPolicy.concurrentGuideLoads {
+                if let channel = pending.next() { enqueue(channel) }
+            }
+            for await result in group {
+                rows[result.id] = result.programs
+                if let channel = pending.next() { enqueue(channel) }
+            }
         }
         guard scheduleRequest == token else { return }
         schedule = rows
