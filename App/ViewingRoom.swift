@@ -14,8 +14,8 @@ struct ViewingRoom: View {
         GeometryReader { geometry in
             let size = geometry.size
             let sidebarWidth = min(size.width * 0.45, max(440, size.width * 0.25))
-            let pictureWidth = model.showsSchedule ? size.width * 0.30 : model.showsSidebar ? min(size.width, size.height * model.videoAspectRatio) : size.width
-            let pictureHeight = model.showsSchedule ? size.height * 0.30 : size.height
+            let pictureWidth = model.showsSchedule ? size.width * FullGuideLayout.previewFraction : model.showsSidebar ? min(size.width, size.height * model.videoAspectRatio) : size.width
+            let pictureHeight = model.showsSchedule ? size.height * FullGuideLayout.previewFraction : size.height
             ZStack(alignment: .topLeading) {
                 Color.black
                 if model.showsSchedule {

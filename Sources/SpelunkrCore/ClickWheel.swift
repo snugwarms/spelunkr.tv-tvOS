@@ -22,10 +22,10 @@ public struct ClickWheel: Sendable {
         // A fresh touch on another edge is not a circular motion.
         guard abs(delta) < 0.9 else { accumulated = 0; return 0 }
         speed = speed * 0.75 + abs(delta) / elapsed * 0.25
-        let acceleration = min(1, max(0, (speed - 2) / 10))
-        accumulated -= delta * (1 + 0.5 * acceleration * acceleration)
-        let threshold = Double.pi / 3 // Six rows per slow turn; gentle gain is capped at 1.5x.
-        guard timestamp - lastStepAt >= 0.11 else {
+        let acceleration = min(1, max(0, (speed - 4) / 12))
+        accumulated -= delta * (1 + 0.25 * acceleration * acceleration)
+        let threshold = Double.pi / 2 // Four rows per slow turn; gentle gain is capped at 1.25x.
+        guard timestamp - lastStepAt >= 0.16 else {
             accumulated = max(-threshold, min(threshold, accumulated))
             return 0
         }

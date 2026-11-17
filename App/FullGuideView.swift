@@ -2,8 +2,11 @@ import SpelunkrCore
 import SwiftUI
 
 private enum GuideFocus: Hashable {
-    case watch, now, earlier, later
     case program(String, String)
+}
+
+enum FullGuideLayout {
+    static let previewFraction: CGFloat = 0.36
 }
 
 struct FullGuideView: View {
@@ -21,22 +24,14 @@ struct FullGuideView: View {
         GeometryReader { geometry in
             let gridWidth = geometry.size.width - 96 - channelWidth
             VStack(alignment: .leading, spacing: 12) {
-                details
-                    .frame(width: geometry.size.width * 0.64 - 70,
-                           height: geometry.size.height * 0.30, alignment: .topLeading)
-                HStack(spacing: 18) {
+                VStack(alignment: .leading, spacing: 12) {
                     Text("PROGRAM GUIDE")
                         .font(.system(size: 28, weight: .black, design: .monospaced)).tracking(3)
                         .foregroundStyle(.yellow)
-                    Spacer()
-                    Button("Watch TV") { model.closeGuides() }.focused($focused, equals: .watch)
-                        .accessibilityIdentifier("watchTV")
-                    Button("Earlier") { page(by: -7200) }.focused($focused, equals: .earlier)
-                    Button("Now") { Task { await model.loadSchedule() } }.focused($focused, equals: .now)
-                    Button("Later") { page(by: 7200) }.focused($focused, equals: .later)
+                    details
                 }
-                .buttonStyle(SidebarButtonStyle(compact: true))
-                .frame(height: 48)
+                .frame(width: geometry.size.width * (1 - FullGuideLayout.previewFraction) - 120,
+                       height: geometry.size.height * FullGuideLayout.previewFraction, alignment: .topLeading)
 
                 HStack(spacing: 0) {
                     Text(model.scheduleStart, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day())
@@ -235,7 +230,7 @@ struct FullGuideView: View {
         let channel = force ? model.channel ?? model.channels.first : selection?.0 ?? model.channel ?? model.channels.first
         let now = Date()
         if let channel, let program = model.schedule[channel.id]?.first(where: { $0.start <= now && $0.end > now }) ?? model.schedule[channel.id]?.first { focused = .program(channel.id, program.key) }
-        else { focused = .watch }
+        else { focused = nil }
     }
 
     private func isPlaying(channel: Channel, program: Program) -> Bool {
@@ -269,7 +264,6 @@ struct FullGuideView: View {
 
     private func moveVertical(_ step: Int) {
         guard let selected = selection, let row = model.channels.firstIndex(where: { $0.id == selected.0.id }) else { return }
-        if row == 0 && step < 0 { focused = .now; return }
         let nextRow = max(0, min(model.channels.count - 1, row + step))
         let channel = model.channels[nextRow]
         let now = Date()

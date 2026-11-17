@@ -100,29 +100,35 @@ final class ViewingRoomTests: XCTestCase {
         let cell = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "schedule-")).firstMatch
         XCTAssertTrue(cell.waitForExistence(timeout: 45))
         let nativePicture = app.otherElements["videoSurface"]
-        XCTAssertEqual(nativePicture.frame.height, app.frame.height * 0.30, accuracy: 2)
+        XCTAssertEqual(nativePicture.frame.height, app.frame.height * 0.36, accuracy: 2)
         XCTAssertGreaterThan(nativePicture.frame.minX, app.frame.width * 0.60)
+        XCTAssertFalse(app.buttons["watchTV"].exists)
+        for title in ["Watch TV", "Earlier", "Now", "Later"] { XCTAssertFalse(app.buttons[title].exists) }
         // A single arrow press moves exactly one channel row.
-        let now = app.buttons["Now"]
+        let selectedChannel = app.staticTexts["guideSelectedChannel"]
         for _ in 0..<45 {
-            if now.hasFocus { break }
+            if selectedChannel.label.contains("CH 02") { break }
             XCUIRemote.shared.press(.up)
         }
-        XCTAssertTrue(now.hasFocus)
-        XCUIRemote.shared.press(.down)
-        XCTAssertTrue(app.staticTexts["guideSelectedChannel"].label.contains("CH 02"))
+        XCTAssertTrue(selectedChannel.label.contains("CH 02"))
+        XCUIRemote.shared.press(.up)
+        XCTAssertTrue(selectedChannel.label.contains("CH 02"), "Up at the first channel should stay in the grid")
         XCUIRemote.shared.press(.down, forDuration: 0.30)
-        XCTAssertTrue(app.staticTexts["guideSelectedChannel"].label.contains("CH 08"))
+        XCTAssertTrue(selectedChannel.label.contains("CH 08"))
         XCUIRemote.shared.press(.up)
-        XCUIRemote.shared.press(.up)
-        XCTAssertTrue(now.hasFocus)
+        XCTAssertTrue(selectedChannel.label.contains("CH 02"))
         let time = app.staticTexts["guideTime-0"]
         let initialTime = time.label
-        XCUIRemote.shared.press(.right) // Later
-        XCUIRemote.shared.press(.select)
+        for _ in 0..<30 {
+            if time.label != initialTime { break }
+            XCUIRemote.shared.press(.right)
+        }
         expectation(for: NSPredicate(format: "label != %@", initialTime), evaluatedWith: time)
         waitForExpectations(timeout: 10)
-        XCUIRemote.shared.press(.left) // Return to the preceding two-hour page.
+        for _ in 0..<30 {
+            if time.label == initialTime { break }
+            XCUIRemote.shared.press(.left)
+        }
         expectation(for: NSPredicate(format: "label == %@", initialTime), evaluatedWith: time)
         waitForExpectations(timeout: 10)
         XCTAssertTrue(full.exists)

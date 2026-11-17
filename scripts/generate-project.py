@@ -64,7 +64,7 @@ common = {
 }
 app_settings = {
     **common, 'PRODUCT_BUNDLE_IDENTIFIER': 'tv.spelunkr.community', 'PRODUCT_NAME': '$(TARGET_NAME)',
-    'MARKETING_VERSION': '0.1.2', 'CURRENT_PROJECT_VERSION': '3',
+    'MARKETING_VERSION': '0.1.3', 'CURRENT_PROJECT_VERSION': '4',
     'INFOPLIST_KEY_CFBundleDisplayName': 'Spelunkr',
     'INFOPLIST_FILE': 'App/Info.plist',
     'INFOPLIST_KEY_UILaunchScreen_Generation': 'YES', 'INFOPLIST_KEY_UIUserInterfaceStyle': 'Dark',

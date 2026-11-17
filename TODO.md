@@ -1,6 +1,6 @@
 # Apple TV app to-do
 
-This checklist tracks requests for version 0.1.2. Items are checked only when implemented and verified, or published where requested.
+This checklist tracks app requests and releases. Items are checked only when implemented and verified, or published where requested.
 
 ## Published
 
@@ -26,6 +26,13 @@ This checklist tracks requests for version 0.1.2. Items are checked only when im
 - [x] When scrolling vertically on the full guide's current-time page, select the program airing now on each destination channel instead of its leftmost program.
 - [x] Keep three-digit channel numbers on one line and move their column slightly left in both guides.
 - [x] Run the final optimized checks (**26 core tests and six simulator UI tests passed**), build and verify the arm64 IPA, and publish source plus release assets. [Version 0.1.2](https://github.com/snugwarms/spelunkr.tv-tvOS/releases/tag/v0.1.2) is live. Local IPA: `build/releases/0.1.2/Spelunkr-tvOS-unsigned.ipa`.
+
+## Version 0.1.3 hotfix
+
+- [x] Reduce circular touchpad scrolling again: four rows per slow turn instead of six, gentler acceleration capped at 1.25×, and at least 160 ms between row movements. Preserve slide animations and arrow-button timing. Optimized touch-trace checks passed; physical remote feel needs confirmation.
+- [x] Remove Watch TV, Earlier, Now, and Later buttons from the full guide and enlarge the top-right preview by 20% in each dimension. Keep Left/Right time browsing and Back navigation working. Simulator navigation checks and screenshot review passed.
+- [x] Verify optimized scrolling tests and guide navigation (**26 core tests and two Release simulator checks passed**) and build and validate the unsigned arm64 Apple TV IPA, version 0.1.3 build 4.
+- [ ] Publish source plus hotfix assets. Local IPA: `build/releases/0.1.3/Spelunkr-tvOS-unsigned.ipa`.
 
 ## Preserve existing behavior
 
