@@ -59,7 +59,7 @@ This checklist tracks app requests and releases. Items are checked only when imp
 - [x] Include Mandatory Viewing's current tape, “Blockbuster: Customer Service Training,” in the same investigation. All three sampled metadata responses selected Canadian mirrors under the previous code and expose separate US storage addresses. Native playback checks of all three exact recordings passed through the temporary relay.
 - [x] Replace generic No Signal with clearer connection, download-stall, missing-recording, access, and format errors; include retry timing and a smaller diagnostic code/server line. HTTP failures are not mislabeled as unsupported codecs. A genuinely unavailable decoder waits for the next program instead of repeatedly requesting the same file.
 - [x] Pass **35 Release core tests and 16 Release simulator checks**. Recovery tests use the real TVModel with injected feeds and byte transport, not a replacement player implementation. Direct native external access on this development machine remains unavailable; the temporary relay is not part of the app.
-- [ ] Build/validate the unsigned arm64 IPA and publish source plus 0.1.6 assets.
+- [x] Build/validate the unsigned arm64 IPA, version 0.1.6 build 7, and publish source plus release assets. [Version 0.1.6](https://github.com/snugwarms/spelunkr.tv-tvOS/releases/tag/v0.1.6) is live; uploads and the IPA checksum were verified. Local IPA: `build/releases/0.1.6/Spelunkr-tvOS-unsigned.ipa`.
 - [ ] Confirm the three reported channels play directly on the user's Apple TV with 0.1.6; the installed version and detailed error line now identify any remaining failure.
 
 ## Preserve existing behavior
