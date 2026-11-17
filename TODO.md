@@ -25,7 +25,7 @@ This checklist tracks requests for version 0.1.2. Items are checked only when im
 - [x] Open both mini guide and full guide on the currently playing channel and bring it into view.
 - [x] When scrolling vertically on the full guide's current-time page, select the program airing now on each destination channel instead of its leftmost program.
 - [x] Keep three-digit channel numbers on one line and move their column slightly left in both guides.
-- [ ] Run the final optimized core and simulator checks, build the 0.1.2 IPA, verify its contents, publish source and release assets, and provide the local IPA path.
+- [x] Run the final optimized checks (**26 core tests and six simulator UI tests passed**), build and verify the arm64 IPA, and publish source plus release assets. [Version 0.1.2](https://github.com/snugwarms/spelunkr.tv-tvOS/releases/tag/v0.1.2) is live. Local IPA: `build/releases/0.1.2/Spelunkr-tvOS-unsigned.ipa`.
 
 ## Preserve existing behavior
 
