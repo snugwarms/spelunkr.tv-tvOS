@@ -35,8 +35,10 @@ for file in test_files:
     test_refs.append(ref)
     test_builds.append(obj('build:' + path, f'{{isa = PBXBuildFile; fileRef = {ref}; }}'))
 
-# Compile the real caption engine in the test runner to exercise native tracks without test hooks in the app.
-for path in ('App/LiveCaptions.swift', 'App/PlaybackAudioTap.swift'):
+# Compile production types in the runner for native-track and player-model recovery checks.
+for file in app_files:
+    if file.name == 'SpelunkrApp.swift': continue
+    path = str(file.relative_to(root))
     test_builds.append(obj('test-build:' + path, f'{{isa = PBXBuildFile; fileRef = {uid(path)}; }}'))
 test_resource_builds = []
 for file in sorted((root / 'UITests/Fixtures').glob('*')):
@@ -77,7 +79,7 @@ common = {
 }
 app_settings = {
     **common, 'PRODUCT_BUNDLE_IDENTIFIER': 'tv.spelunkr.community', 'PRODUCT_NAME': '$(TARGET_NAME)',
-    'MARKETING_VERSION': '0.1.5', 'CURRENT_PROJECT_VERSION': '6',
+    'MARKETING_VERSION': '0.1.6', 'CURRENT_PROJECT_VERSION': '7',
     'INFOPLIST_KEY_CFBundleDisplayName': 'Spelunkr',
     'INFOPLIST_FILE': 'App/Info.plist',
     'INFOPLIST_KEY_UILaunchScreen_Generation': 'YES', 'INFOPLIST_KEY_UIUserInterfaceStyle': 'Dark',
@@ -88,6 +90,7 @@ app_settings = {
 test_settings = {
     **common, 'PRODUCT_BUNDLE_IDENTIFIER': 'tv.spelunkr.community.uitests',
     'PRODUCT_NAME': '$(TARGET_NAME)', 'TEST_TARGET_NAME': 'Spelunkr',
+    'MARKETING_VERSION': app_settings['MARKETING_VERSION'], 'CURRENT_PROJECT_VERSION': app_settings['CURRENT_PROJECT_VERSION'],
 }
 
 def configs(name, settings):

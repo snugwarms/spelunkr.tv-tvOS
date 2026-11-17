@@ -98,8 +98,14 @@ struct ViewingRoom: View {
             if let error = model.error ?? (model.channel == nil && !model.isLoading ? model.guideError : nil) {
                 VStack(spacing: 22) {
                     Image(systemName: "antenna.radiowaves.left.and.right.slash").font(.system(size: 48))
-                    Text("NO SIGNAL").font(.system(size: 30, weight: .black, design: .monospaced)).tracking(5)
+                    Text(model.playbackFailure?.title ?? (model.channel == nil ? "GUIDE UNAVAILABLE" : "VIDEO UNAVAILABLE"))
+                        .font(.system(size: 30, weight: .black, design: .monospaced)).tracking(3)
                     Text(error).font(.system(size: 23)).multilineTextAlignment(.center).frame(maxWidth: 650)
+                    if let details = model.playbackFailure?.details {
+                        Text(details).font(.system(size: 16, design: .monospaced)).foregroundStyle(.white.opacity(0.65))
+                            .multilineTextAlignment(.center).frame(maxWidth: 700)
+                            .accessibilityIdentifier("playbackErrorDetails")
+                    }
                     if !model.showsSidebar { Text("Press Back for the guide and Retry").font(.system(size: 20)).foregroundStyle(Palette.cyan) }
                 }
                 .foregroundStyle(.white).padding(50)
@@ -190,6 +196,8 @@ struct ViewingRoom: View {
                 VStack(alignment: .trailing, spacing: 4) {
                     Text("ORIGINAL: SPELUNKR.TV")
                     Text("VIDEO: INTERNET ARCHIVE")
+                    Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "–")")
+                        .accessibilityIdentifier("appVersion")
                 }
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(Palette.muted)

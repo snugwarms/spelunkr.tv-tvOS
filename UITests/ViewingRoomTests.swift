@@ -1,6 +1,18 @@
 import XCTest
 
 final class ViewingRoomTests: XCTestCase {
+    func testInstalledVersionAppearsAtMiniGuideBottomRight() throws {
+        let app = XCUIApplication()
+        app.launch()
+        let version = app.staticTexts["appVersion"]
+        XCTAssertTrue(version.waitForExistence(timeout: 10))
+        let expectedVersion = try XCTUnwrap(Bundle(for: Self.self).object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+        XCTAssertEqual(version.label, "v\(expectedVersion)")
+        XCTAssertGreaterThan(version.frame.minX, app.frame.width * 0.7)
+        XCTAssertGreaterThan(version.frame.minY, app.frame.height * 0.85)
+        attach(app, "Installed version at mini-guide bottom right")
+    }
+
     func testQuickSettingsDoesNotPausePlayback() throws {
         let app = XCUIApplication()
         app.launch()

@@ -62,11 +62,11 @@ public actor BroadcastService {
     public func tune(channel: Channel, at: Date = Date()) async throws -> ResolvedPlayback {
         try await ensureLoaded(channel)
         let plan = try engine().tune(id: channel.id, at: at)
-        var mediaURL: URL?, fallbackURL: URL?, audioURL: URL?
+        var mediaURL: URL?, alternateMediaURLs: [URL] = [], audioURL: URL?
         if plan.isVideo, let id = plan.archiveID {
             let result = try await resolveMedia(id: id, file: plan.file)
             mediaURL = result.primary
-            fallbackURL = result.fallback
+            alternateMediaURLs = result.alternates
         }
         if let filename = plan.audioFile {
             // The metadata's audio attribution URL is not a stream URL.
@@ -74,7 +74,7 @@ public actor BroadcastService {
                 audioURL = base.appendingPathComponent(filename)
             }
         }
-        return ResolvedPlayback(plan: plan, mediaURL: mediaURL, fallbackURL: fallbackURL, audioURL: audioURL,
+        return ResolvedPlayback(plan: plan, mediaURL: mediaURL, alternateMediaURLs: alternateMediaURLs, audioURL: audioURL,
                                 synopsis: plan.program.synopsis ?? plan.archiveID.flatMap { metadata[$0]?.synopsis })
     }
 
@@ -155,7 +155,7 @@ public actor BroadcastService {
         return data
     }
 
-    private func resolveMedia(id: String, file: String?) async throws -> (primary: URL, fallback: URL?) {
+    private func resolveMedia(id: String, file: String?) async throws -> (primary: URL, alternates: [URL]) {
         var info = metadata[id]
         if info == nil {
             let url = URL(string: "https://archive.org/metadata/")!.appendingPathComponent(id)
@@ -166,14 +166,11 @@ public actor BroadcastService {
                 metadata[id] = decoded
             }
         }
-        var filename = file
-        if filename == nil || !["mp4", "m4v", "mov"].contains((filename! as NSString).pathExtension.lowercased()) {
-            let files = info?.files?.filter { ["mp4", "m4v"].contains(($0.name as NSString).pathExtension.lowercased()) } ?? []
-            filename = (files.first { $0.format == "h.264 IA" } ?? files.first { $0.format == "h.264" } ?? files.first)?.name
-        }
+        let filename = info?.playbackFilename(requested: file) ?? file.flatMap { ["mp4", "m4v", "mov"].contains(($0 as NSString).pathExtension.lowercased()) ? $0 : nil }
         guard let filename, let redirect = MediaURL.archive(id: id, file: filename) else { throw BroadcastError.noVideo }
-        if let info, let direct = info.directURL(file: filename) { return (direct, redirect) }
-        return (redirect, nil)
+        var candidates = info?.directURLs(file: filename) ?? []
+        if !candidates.contains(redirect) { candidates.append(redirect) }
+        return (candidates[0], Array(candidates.dropFirst()))
     }
 
     public func tapeSynopsis(id: String) async throws -> String? {
@@ -195,11 +192,12 @@ struct ArchiveMetadata: Decodable {
         }
         private enum CodingKeys: String, CodingKey { case description }
     }
-    struct File: Decodable { let name: String; let format: String? }
+    struct File: Decodable { let name: String; let format: String?; let original: String? }
     struct Location: Decodable { let server: String?; let dir: String? }
-    struct Alternate: Decodable { let servers: [Location]? }
+    struct Alternate: Decodable { let servers: [Location]?; let workable: [Location]? }
     let server: String?
     let d1: String?
+    let d2: String?
     let dir: String?
     let files: [File]?
     let alternate_locations: Alternate?
@@ -217,14 +215,39 @@ struct ArchiveMetadata: Decodable {
         return text.isEmpty ? nil : text
     }
 
-    func directURL(file: String) -> URL? {
-        let alternate = alternate_locations?.servers?.first
-        guard let host = alternate?.server ?? server ?? d1,
-              host == "archive.org" || host.hasSuffix(".archive.org"),
-              !host.contains("/"), !host.contains(":"),
-              let directory = alternate?.dir ?? dir,
-              !directory.contains(".."), !file.split(separator: "/").contains(".."),
-              let base = URL(string: "https://\(host)") else { return nil }
-        return base.appendingPathComponent(directory).appendingPathComponent(file)
+    func playbackFilename(requested: String?) -> String? {
+        let videos = files?.filter { ["mp4", "m4v", "mov"].contains(($0.name as NSString).pathExtension.lowercased()) } ?? []
+        let h264 = videos.filter { $0.format?.lowercased().hasPrefix("h.264") == true }
+            .sorted { ($0.format?.lowercased() == "h.264 ia" ? 0 : 1) < ($1.format?.lowercased() == "h.264 ia" ? 0 : 1) }
+        guard let requested else { return (h264.first ?? videos.first)?.name }
+        let source = files?.first { $0.name == requested }
+        if source?.format?.lowercased().hasPrefix("h.264") == true { return requested }
+        // Archive often already has an H.264 conversion of an unsupported original.
+        // Match its provenance so multi-episode items never switch to an unrelated recording.
+        if let converted = h264.first(where: {
+            $0.original == requested || (source?.original != nil && $0.original == source?.original)
+        }) { return converted.name }
+        if ["mp4", "m4v", "mov"].contains((requested as NSString).pathExtension.lowercased()) { return requested }
+        return h264.count == 1 ? h264[0].name : nil
+    }
+
+    func directURL(file: String) -> URL? { directURLs(file: file).first }
+
+    func directURLs(file: String) -> [URL] {
+        let locations = [Location(server: server, dir: dir), Location(server: d1, dir: dir), Location(server: d2, dir: dir)] +
+            (alternate_locations?.workable ?? []) +
+            (alternate_locations?.servers ?? [])
+        var result: [URL] = []
+        for location in locations {
+            guard let host = location.server?.lowercased(),
+                  host == "archive.org" || host.hasSuffix(".archive.org"),
+                  !host.contains("/"), !host.contains(":"), !host.contains("@"),
+                  let directory = location.dir ?? dir,
+                  !directory.contains(".."), !file.split(separator: "/").contains(".."),
+                  let base = URL(string: "https://\(host)") else { continue }
+            let url = base.appendingPathComponent(directory).appendingPathComponent(file)
+            if !result.contains(url) { result.append(url) }
+        }
+        return Array(result.prefix(5))
     }
 }

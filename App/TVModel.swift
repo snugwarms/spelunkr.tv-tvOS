@@ -26,7 +26,8 @@ final class TVModel: ObservableObject {
     @Published private(set) var normalizesVolume = UserDefaults.standard.object(forKey: "normalizesVolume") as? Bool ?? true
     private var playbackAudioTap: PlaybackAudioTap?
     private let audioPlayer = AVPlayer()
-    private let service = BroadcastService(session: NetworkAudit.session)
+    private let service: BroadcastService
+    private let mediaURLTransform: (URL) -> URL
     @Published private(set) var channels: [Channel] = []
     @Published private(set) var guide: [String: GuideEntry] = [:]
     @Published private(set) var channelErrors: [String: String] = [:]
@@ -37,6 +38,7 @@ final class TVModel: ObservableObject {
     @Published private(set) var isBuffering = false
     @Published private(set) var isPaused = false
     @Published private(set) var error: String?
+    @Published private(set) var playbackFailure: PlaybackFailureInfo?
     @Published private(set) var guideError: String?
     @Published private(set) var isRefreshing = false
     @Published private(set) var favoriteIDs: Set<String>
@@ -61,6 +63,13 @@ final class TVModel: ObservableObject {
     private var refreshTask: Task<Void, Never>?
     private var recoveryTask: Task<Void, Never>?
     private var watchdogTask: Task<Void, Never>?
+    private var watchdogID = UUID()
+    private var videoStartupTask: Task<Void, Never>?
+    private var videoAttempt = UUID()
+    private var preparedVideoAttempt: UUID?
+    private var remainingMediaURLs: [URL] = []
+    private var videoHasStarted = false
+    private var needsStartupLiveSync = false
     private var statusObservation: NSKeyValueObservation?
     private var controlObservation: NSKeyValueObservation?
     private var audioRouteObservation: NSObjectProtocol?
@@ -68,21 +77,21 @@ final class TVModel: ObservableObject {
     private var failedObservation: NSObjectProtocol?
     private var generation = UUID()
     private var foreground = true
-    private var usedFallback = false
     private var internalPlayerChange = true
     private var liveBoundaryObserver: Any?
     private var retryCount = 0
     private var started = false
 
-    init() {
+    init(service: BroadcastService = BroadcastService(session: NetworkAudit.session), mediaURLTransform: @escaping (URL) -> URL = { $0 }) {
+        self.service = service
+        self.mediaURLTransform = mediaURLTransform
         favoriteIDs = Set(UserDefaults.standard.stringArray(forKey: "favoriteChannels") ?? [])
         player.automaticallyWaitsToMinimizeStalling = true
         liveBoundaryObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.1, preferredTimescale: 1000), queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.enforceLiveBoundary() }
         }
         controlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
-            let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
-            Task { @MainActor [weak self] in self?.bufferingChanged(waiting) }
+            Task { @MainActor [weak self] in self?.bufferingChanged() }
         }
         let commands = MPRemoteCommandCenter.shared()
         commands.playCommand.addTarget { [weak self] _ in Task { @MainActor [weak self] in self?.resumePlayback() }; return .success }
@@ -157,6 +166,8 @@ final class TVModel: ObservableObject {
     func tune(_ selected: Channel, resetRetry: Bool = true) {
         logger.debug("Tune \(selected.id, privacy: .public)")
         tuneTask?.cancel(); transitionTask?.cancel(); recoveryTask?.cancel(); watchdogTask?.cancel()
+        videoStartupTask?.cancel()
+        videoAttempt = UUID()
         let token = UUID()
         generation = token
         internalPlayerChange = true
@@ -171,7 +182,7 @@ final class TVModel: ObservableObject {
         playbackAudioTap?.stop(); playbackAudioTap = nil
         player.replaceCurrentItem(with: nil); audioPlayer.replaceCurrentItem(with: nil)
         clearObservers()
-        playback = nil; error = nil; isTuning = true; usedFallback = false
+        playback = nil; error = nil; playbackFailure = nil; isTuning = true; remainingMediaURLs = []
         tuneTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -181,6 +192,7 @@ final class TVModel: ObservableObject {
                 // Metadata or a slow network can cross a station-break boundary.
                 guard resolved.plan.program.end > Date() else { tune(selected); return }
                 playback = resolved
+                remainingMediaURLs = resolved.alternateMediaURLs
                 if let synopsis = resolved.synopsis { tapeSynopses[resolved.plan.program.id] = synopsis }
                 community.watch(videoID: resolved.plan.program.type == "video" ? resolved.plan.archiveID : nil,
                                 sessionKey: "\(selected.id):\(resolved.plan.program.key)") { [weak self] in
@@ -204,8 +216,18 @@ final class TVModel: ObservableObject {
     }
 
     private func installVideo(_ url: URL, token: UUID) {
+        videoAttempt = UUID()
+        let attempt = videoAttempt
+        videoStartupTask?.cancel()
+        stopVideoWatchdog()
         clearObservers()
-        let item = AVPlayerItem(url: url)
+        internalPlayerChange = true
+        videoHasStarted = false
+        needsStartupLiveSync = true
+        captions.bind(nil)
+        playbackAudioTap?.stop(); playbackAudioTap = nil
+        player.pause()
+        let item = AVPlayerItem(url: mediaURLTransform(url))
         item.allowedAudioSpatializationFormats = []
         if let plan = playback?.plan {
             let title = AVMutableMetadataItem()
@@ -222,74 +244,137 @@ final class TVModel: ObservableObject {
         isBuffering = true
         statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             Task { @MainActor [weak self] in
-                guard let self, generation == token, player.currentItem === item else { return }
+                guard let self, generation == token, videoAttempt == attempt, player.currentItem === item else { return }
                 switch item.status {
                 case .readyToPlay:
-                    await prepareAudioProcessing(item, token: token)
-                    guard generation == token, foreground else { return }
-                    let size = item.presentationSize
-                    if size.height > 0 { videoAspectRatio = size.width / size.height }
-                    guard let plan = playback?.plan else { return }
-                    guard plan.program.end > Date() else { if let channel { tune(channel) }; return }
-                    let target = plan.inPoint + plan.offset(at: Date())
-                    player.seek(to: CMTime(seconds: target, preferredTimescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] completed in
-                        Task { @MainActor [weak self] in
-                            guard let self, generation == token, completed, foreground else { return }
-                            isBuffering = false; error = nil; watchdogTask?.cancel()
-                            internalPlayerChange = false
-                            if !isPaused { player.play(); captions.playbackReady() }
-                        }
+                    guard preparedVideoAttempt != attempt else { return }
+                    preparedVideoAttempt = attempt
+                    videoStartupTask?.cancel()
+                    videoStartupTask = Task { [weak self] in
+                        guard let self else { return }
+                        await prepareAudioProcessing(item, token: token)
+                        guard !Task.isCancelled, generation == token, videoAttempt == attempt,
+                              player.currentItem === item, foreground else { return }
+                        let size = item.presentationSize
+                        if size.height > 0 { videoAspectRatio = size.width / size.height }
+                        guard let plan = playback?.plan else { return }
+                        guard plan.program.end > Date() else { if let channel { tune(channel) }; return }
+                        seekVideoToLive(item: item, token: token, attempt: attempt)
                     }
-                case .failed: videoFailed(token: token)
+                case .failed: videoFailed(token: token, attempt: attempt, reason: "Player rejected the tape")
                 default: break
                 }
             }
         }
         failedObservation = NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.videoFailed(token: token) }
+            Task { @MainActor [weak self] in self?.videoFailed(token: token, attempt: attempt, reason: "Playback stopped") }
         }
         endedObservation = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, generation == token else { return }
+                guard let self, generation == token, videoAttempt == attempt, player.currentItem === item else { return }
                 if let plan = playback?.plan, plan.program.end.timeIntervalSinceNow > 2 {
                     isBuffering = false
                     error = "This tape ended early. The next program will tune automatically."
                 } else if let channel { tune(channel) }
             }
         }
-        watchdogTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(25))
-            guard !Task.isCancelled, let self, generation == token, isBuffering else { return }
-            videoFailed(token: token)
+        armVideoWatchdog(item: item, token: token, attempt: attempt)
+    }
+
+    private func seekVideoToLive(item: AVPlayerItem, token: UUID, attempt: UUID, catchingUp: Bool = false) {
+        guard let plan = playback?.plan else { return }
+        let target = plan.livePosition(at: Date())
+        // Allow an earlier decodable frame without ever seeking ahead of live.
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 1000),
+                    toleranceBefore: CMTime(seconds: 2, preferredTimescale: 1000), toleranceAfter: .zero) { [weak self] completed in
+            Task { @MainActor [weak self] in
+                guard let self, generation == token, videoAttempt == attempt,
+                      player.currentItem === item, foreground else { return }
+                guard completed else { return } // AVKit may cancel this seek when the user scrubs.
+                guard needsStartupLiveSync else { return } // A manual seek now owns the playhead.
+                // A slow range request can finish well after its original live target.
+                if !catchingUp, plan.livePosition(at: Date()) - player.currentTime().seconds > 8 {
+                    seekVideoToLive(item: item, token: token, attempt: attempt, catchingUp: true)
+                    return
+                }
+                error = nil
+                internalPlayerChange = false
+                if !isPaused { player.playImmediately(atRate: 1); captions.playbackReady() }
+            }
         }
     }
 
-    private func videoFailed(token: UUID) {
-        guard generation == token, foreground else { return }
-        watchdogTask?.cancel()
-        if !usedFallback, let url = playback?.fallbackURL {
-            usedFallback = true
-            installVideo(url, token: token)
+    private func videoFailed(token: UUID, attempt: UUID, reason: String) {
+        guard generation == token, videoAttempt == attempt, foreground else { return }
+        stopVideoWatchdog()
+        let item = player.currentItem
+        let lastEvent = item?.errorLog()?.events.last
+        let host = (item?.asset as? AVURLAsset)?.url.host ?? "Archive"
+        let info = PlaybackFailureInfo.make(error: item?.error, logDomain: lastEvent?.errorDomain,
+                                            logStatus: lastEvent?.errorStatusCode, logComment: lastEvent?.errorComment, reason: reason, host: host,
+                                            retryAfter: min(30, 5 * (retryCount + 1)))
+        logger.error("Video recovery: \(info.details, privacy: .public), channel=\(self.channel?.id ?? "", privacy: .public)")
+        if !remainingMediaURLs.isEmpty {
+            installVideo(remainingMediaURLs.removeFirst(), token: token)
         } else {
             isBuffering = false
-            error = "The tape could not be played. Retrying shortly…"
-            scheduleRecovery(token: token)
+            playbackFailure = info
+            error = info.message
+            if info.shouldRetry { scheduleRecovery(token: token) }
         }
     }
 
-    private func bufferingChanged(_ waiting: Bool) {
-        isBuffering = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
-        if player.timeControlStatus == .playing { isPaused = false }
+    private func bufferingChanged() {
+        isBuffering = !isPaused && (internalPlayerChange && playback?.plan.isVideo == true || player.timeControlStatus == .waitingToPlayAtSpecifiedRate)
+        if player.timeControlStatus == .playing {
+            isPaused = false
+            videoHasStarted = true
+            isBuffering = false
+            captions.playbackReady()
+            stopVideoWatchdog()
+        }
         else if player.timeControlStatus == .paused, foreground, !internalPlayerChange, !isTuning, playback?.plan.isVideo == true {
             isPaused = true
+            stopVideoWatchdog()
         }
-        guard waiting, !isPaused, foreground, playback?.plan.isVideo == true else { return }
-        let token = generation
+        guard isBuffering, !isPaused, foreground, playback?.plan.isVideo == true, let item = player.currentItem else { return }
+        armVideoWatchdog(item: item, token: generation, attempt: videoAttempt)
+    }
+
+    private func stopVideoWatchdog() {
         watchdogTask?.cancel()
+        watchdogTask = nil
+        watchdogID = UUID()
+    }
+
+    private func armVideoWatchdog(item: AVPlayerItem, token: UUID, attempt: UUID) {
+        guard watchdogTask == nil, !isPaused else { return }
+        let identifier = UUID()
+        watchdogID = identifier
         watchdogTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(25))
-            guard !Task.isCancelled, let self, generation == token, isBuffering else { return }
-            videoFailed(token: token)
+            var monitor = PlaybackProgressWatchdog(at: ProcessInfo.processInfo.systemUptime)
+            let beganAt = ProcessInfo.processInfo.systemUptime
+            var nudged = false
+            defer { if self?.watchdogID == identifier { self?.watchdogTask = nil } }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self, generation == token, videoAttempt == attempt,
+                      player.currentItem === item, foreground, !isPaused else { return }
+                if player.timeControlStatus == .playing { videoHasStarted = true; return }
+                let now = ProcessInfo.processInfo.systemUptime
+                let ranges = item.loadedTimeRanges.map(\.timeRangeValue)
+                let end = ranges.map { CMTimeRangeGetEnd($0).seconds }.filter(\.isFinite).max() ?? 0
+                let bytes = item.accessLog()?.events.reduce(Int64(0)) { $0 + $1.numberOfBytesTransferred } ?? 0
+                if !nudged, !internalPlayerChange, item.status == .readyToPlay, now - beganAt >= 5 {
+                    nudged = true
+                    player.playImmediately(atRate: 1)
+                }
+                if monitor.shouldRetry(at: now, bytes: bytes, bufferedThrough: end,
+                                       position: player.currentTime().seconds, isStarting: !videoHasStarted) {
+                    videoFailed(token: token, attempt: attempt, reason: "Loading stalled")
+                    return
+                }
+            }
         }
     }
 
@@ -340,7 +425,7 @@ final class TVModel: ObservableObject {
     private func prepareAudioProcessing(_ item: AVPlayerItem, token: UUID) async {
         do {
             let tap = try await PlaybackAudioTap.shared(for: item)
-            guard generation == token else { tap.stop(); return }
+            guard generation == token, player.currentItem === item || audioPlayer.currentItem === item else { tap.stop(); return }
             playbackAudioTap = tap
             tap.setNormalization(normalizesVolume)
         } catch { logger.error("Could not start audio processing: \(error.localizedDescription, privacy: .public)") }
@@ -389,6 +474,8 @@ final class TVModel: ObservableObject {
             startRefreshLoop()
         } else {
             generation = UUID()
+            videoAttempt = UUID()
+            videoStartupTask?.cancel()
             tuneTask?.cancel(); transitionTask?.cancel(); recoveryTask?.cancel(); watchdogTask?.cancel(); refreshTask?.cancel()
             player.pause(); audioPlayer.pause()
             captions.bind(nil)
@@ -439,6 +526,21 @@ final class TVModel: ObservableObject {
               plan.isVideo, player.currentItem?.status == .readyToPlay else { return }
         let position = player.currentTime().seconds
         let ceiling = plan.livePosition(at: Date())
+        if needsStartupLiveSync, !isPaused, player.timeControlStatus == .playing, position.isFinite {
+            let hasBufferedVideo = player.currentItem?.loadedTimeRanges.contains {
+                let range = $0.timeRangeValue
+                return range.start.seconds <= position && CMTimeRangeGetEnd(range).seconds >= position + 0.25
+            } == true
+            if hasBufferedVideo {
+                if ceiling - position > 8, let item = player.currentItem {
+                    internalPlayerChange = true
+                    player.pause()
+                    seekVideoToLive(item: item, token: generation, attempt: videoAttempt, catchingUp: true)
+                    return
+                }
+                needsStartupLiveSync = false
+            }
+        }
         guard position.isFinite, position > ceiling + 0.08 else { return }
         let shouldPlay = !isPaused
         let token = generation
@@ -451,6 +553,12 @@ final class TVModel: ObservableObject {
                 if shouldPlay { player.play() }
             }
         }
+    }
+
+    func userDidNavigatePlayback() {
+        needsStartupLiveSync = false
+        internalPlayerChange = false
+        videoStartupTask?.cancel()
     }
 
     var guideVisible: Bool { showsSidebar || showsSchedule }

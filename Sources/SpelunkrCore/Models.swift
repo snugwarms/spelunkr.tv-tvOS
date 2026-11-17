@@ -101,7 +101,8 @@ public struct PlaybackPlan: Decodable, Sendable {
 public struct ResolvedPlayback: Sendable {
     public let plan: PlaybackPlan
     public let mediaURL: URL?
-    public let fallbackURL: URL?
+    public let alternateMediaURLs: [URL]
+    public var fallbackURL: URL? { alternateMediaURLs.first }
     public let audioURL: URL?
     public let synopsis: String?
 }

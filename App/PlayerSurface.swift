@@ -142,6 +142,7 @@ final class PlayerHostController: UIViewController, AVPlayerViewControllerDelega
     }
     func playerViewController(_ playerViewController: AVPlayerViewController, timeToSeekAfterUserNavigatedFrom oldTime: CMTime, to targetTime: CMTime) -> CMTime {
         guard let plan = model?.playback?.plan else { return targetTime }
+        model?.userDidNavigatePlayback()
         return CMTime(seconds: plan.clampedSeek(targetTime.seconds, at: Date()), preferredTimescale: 1000)
     }
 }

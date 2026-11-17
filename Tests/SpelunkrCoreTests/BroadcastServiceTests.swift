@@ -126,6 +126,30 @@ final class BroadcastServiceTests: XCTestCase {
         XCTAssertEqual(recovered, Array(repeating: true, count: 18))
         XCTAssertEqual(requests.value, 2, "A failed shared fetch must clear so the next attempt can succeed")
     }
+
+    func testPlaybackFallbackTriesARealMirrorBeforeTheSameRedirect() async throws {
+        let requests = AssetRequestCounter()
+        BroadcastMockProtocol.handler = { request in
+            requests.increment()
+            if request.url?.host == "archive.org" {
+                return (200, Data("""
+                {"server":"dn800307.us.archive.org","d1":"dn800307.us.archive.org","dir":"/0/items/tape",
+                 "alternate_locations":{"workable":[{"server":"dn711306.ca.archive.org","dir":"/0/items/tape"}]}}
+                """.utf8))
+            }
+            if request.url?.lastPathComponent == "lineup.json" { return (200, Self.lineup) }
+            return (200, Data("""
+            {"engine":5,"items":[{"id":"tape","title":"Tape","duration":3600,"mp4":"tape.mp4"}]}
+            """.utf8))
+        }
+        let service = BroadcastService(session: session(), roots: [URL(string: "https://data.example/")!])
+        let lineup = try await service.lineup()
+        let resolved = try await service.tune(channel: XCTUnwrap(lineup.availableChannels.first), at: Date(timeIntervalSince1970: 1000))
+        XCTAssertEqual(resolved.mediaURL?.host, "dn800307.us.archive.org")
+        XCTAssertEqual(resolved.alternateMediaURLs.map(\.host), ["dn711306.ca.archive.org", "archive.org"])
+        XCTAssertEqual(resolved.fallbackURL?.host, "dn711306.ca.archive.org")
+        XCTAssertEqual(requests.value, 3, "Mirror discovery uses the existing metadata response, with no extra probes")
+    }
 }
 
 private final class AssetRequestCounter {

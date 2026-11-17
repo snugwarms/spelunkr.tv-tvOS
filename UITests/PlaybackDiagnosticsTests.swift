@@ -18,21 +18,34 @@ final class PlaybackDiagnosticsTests: XCTestCase {
         try await checkPlayback("https://dn710702.ca.archive.org/0/items/bad_influence_se1ep9/Bad.Influence.se1ep9.mp4", seek: 454)
     }
 
-    private func checkPlayback(_ url: String, seek: Double) async throws {
+    func testSonsOfPitchesPausedStartup() async throws {
+        try await checkPlayback("https://dn711306.ca.archive.org/0/items/retnsap2002sonsofpitches/RETN-SAP-2002-SonsofPitches.mp4", seek: 1237, primeBeforeSeeking: false)
+    }
+
+    func testBadInfluenceEpisode10PausedStartup() async throws {
+        try await checkPlayback("https://dn711102.ca.archive.org/0/items/bad_influence_se1ep10/Bad.Influence.se1ep10.mp4", seek: 748, primeBeforeSeeking: false)
+    }
+
+    func testMandatoryViewingBlockbusterPausedStartup() async throws {
+        try await checkPlayback("https://dn600208.us.archive.org/0/items/blockbuster-video-training-video/blockbuster%20video%20training%20video.ia.mp4", seek: 60, primeBeforeSeeking: false)
+    }
+
+    private func checkPlayback(_ url: String, seek: Double, primeBeforeSeeking: Bool = true) async throws {
         guard ProcessInfo.processInfo.environment["SPELUNKR_LIVE_PLAYBACK_TESTS"] == "1" else {
             throw XCTSkip("Opt-in Archive playback check")
         }
         let sourceURL: URL
         if let proxy = ProcessInfo.processInfo.environment["SPELUNKR_MEDIA_PROXY"] {
-            let name = url.contains("Jam_session") ? "open-mic" : url.contains("Influence") ? "warp-zone" : "control"
+            let name = url.contains("blockbuster") ? "mandatory" : url.contains("RETN-SAP") ? "sons" : url.contains("se1ep10") ? "bad10" : url.contains("Jam_session") ? "open-mic" : url.contains("Influence") ? "warp-zone" : "control"
             sourceURL = URL(string: proxy)!.appendingPathComponent("\(name).mp4")
         } else { sourceURL = URL(string: url)! }
         let item = AVPlayerItem(url: sourceURL)
         item.allowedAudioSpatializationFormats = []
+        item.preferredForwardBufferDuration = 8
         let player = AVPlayer(playerItem: item)
         player.isMuted = true
         let surface = AVPlayerLayer(player: player)
-        player.play()
+        if primeBeforeSeeking { player.play() }
         defer { player.pause(); player.replaceCurrentItem(with: nil) }
         for _ in 0..<300 {
             if item.status != .unknown { break }

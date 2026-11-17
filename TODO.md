@@ -48,7 +48,19 @@ This checklist tracks app requests and releases. Items are checked only when imp
 - [x] Check native playback of the two exact recordings and a known-good control, including live-position seeking and normalization: **three Release simulator checks passed through a temporary local relay**. Direct native external connections failed with network-unavailable errors even for the control; these runs do not establish direct-device playback. No relay is included in the app.
 - [x] Improve the diagnostic CLI so requested channels can be checked together without fetching all channel guides; add opt-in, bounded live-media checks that ordinary tests skip.
 - [x] Build and validate the unsigned arm64 Apple TV IPA, version 0.1.5 build 6, and publish source plus release assets. [Version 0.1.5](https://github.com/snugwarms/spelunkr.tv-tvOS/releases/tag/v0.1.5) is live; uploads and the IPA checksum were verified. Local IPA: `build/releases/0.1.5/Spelunkr-tvOS-unsigned.ipa`.
-- [ ] Confirm the reported channels play on the user's physical Apple TV after installing the feed-access fix; check different tape titles if the sampled recordings do not match the report.
+- [x] Record the user's hardware feedback: 0.1.5 did **not** resolve the playback freeze. The confirmed recordings and follow-up are tracked under 0.1.6.
+
+## Version 0.1.6 — startup freeze investigation
+
+- [x] Investigate the 25–50 second freeze and No Signal retry on “Sons of Pitches in Concert” and “Bad Influence!: Cheat Devices, Code Screens.” The old fallback returned to the same mirror, and the old 25-second timer discarded stalled startup. Prefer the primary US storage address, try distinct replicas on failure, retain progressing loads, and start available media promptly. Stale item callbacks are isolated by attempt.
+- [x] Verify actual codecs and use Apple TV compatible conversions when needed. Sons/Bad Influence use H.264 Constrained Baseline level 3.0; Blockbuster uses H.264 Main level 3.0. All are 640×480 yuv420p with stereo AAC-LC at 44.1 kHz. These tapes already meet Apple TV's format support. The resolver also selects existing Archive H.264 conversions by recording provenance when needed.
+- [x] Test paused startup → audio processing → live seek → play for all three recordings. Exercise the actual player model with an unavailable primary, advancing video frames, a genuine 30-second live-range delay, catch-up within eight seconds of live, and manual rewind. Fix the extra lag found by the delayed-start check.
+- [x] Show the installed app version at the bottom right of the mini guide. Screenshot review and a version-matching UI check passed.
+- [x] Include Mandatory Viewing's current tape, “Blockbuster: Customer Service Training,” in the same investigation. All three sampled metadata responses selected Canadian mirrors under the previous code and expose separate US storage addresses. Native playback checks of all three exact recordings passed through the temporary relay.
+- [x] Replace generic No Signal with clearer connection, download-stall, missing-recording, access, and format errors; include retry timing and a smaller diagnostic code/server line. HTTP failures are not mislabeled as unsupported codecs. A genuinely unavailable decoder waits for the next program instead of repeatedly requesting the same file.
+- [x] Pass **35 Release core tests and 16 Release simulator checks**. Recovery tests use the real TVModel with injected feeds and byte transport, not a replacement player implementation. Direct native external access on this development machine remains unavailable; the temporary relay is not part of the app.
+- [ ] Build/validate the unsigned arm64 IPA and publish source plus 0.1.6 assets.
+- [ ] Confirm the three reported channels play directly on the user's Apple TV with 0.1.6; the installed version and detailed error line now identify any remaining failure.
 
 ## Preserve existing behavior
 
