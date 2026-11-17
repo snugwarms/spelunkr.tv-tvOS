@@ -22,7 +22,7 @@ The website's seven **yellow SVG reaction icons** float upward over the video. B
 
 ## Run on an Apple TV
 
-Requires a Mac with Xcode 27.2 or later to build, and an Apple TV running tvOS 17 or later to watch. Automatic captions require tvOS 26 or later and compatible speech-model support.
+Requires a Mac with Xcode to build, and an Apple TV running tvOS 17 or later to watch. This release was built with Xcode 27.2.
 
 1. Open `Spelunkr.xcodeproj` in Xcode. No third-party packages or project generator are required.
 2. Select the **Spelunkr** target, then **Signing & Capabilities**. Choose your development team and a unique bundle identifier if needed.
@@ -54,23 +54,23 @@ Favorites and the last channel survive app restarts. Returning from the backgrou
 
 Physical arrows in the full guide are tracked from press to release: one move on key-down, then repeats only after a 500 ms hold, every 220 ms. The app does not treat the operating system's key-repeat bursts as separate taps. Icons use the live lineup's pixel artwork and palette, below the number in the mini guide and beside it in the full guide.
 
-## Automatic captions
+## Subtitles
 
-Embedded subtitle tracks use AVKit's native selection controls when present. **Automatic Captions** in the native playback controls enables experimental English captions using Apple's on-device SpeechAnalyzer and SpeechTranscriber. The first use may download Apple's speech model. The app transcribes decoded video audio directly; it does not use the remote's microphone. Captions restart after seeking or changing channels and appear over the video.
-
-This option requires tvOS 26 or later and a device supported by Apple's speech model. It displays an explanation if the device or model is unavailable. Transcription accuracy and timing depend on the recording; old audio and music can be difficult to recognize. Physical Apple TV transcription still needs validation.
+Embedded subtitle tracks use AVKit's native selection controls when present. Automatic speech captions are removed in version 0.1.1. The app no longer links Speech or MediaToolbox or installs an audio tap.
 
 ## Development and checks
 
 ```sh
 ./scripts/build.sh
-swift test
+swift test -c release
 # Include the remote / layout simulator check:
-./scripts/test.sh 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation) (at 1080p)'
+./scripts/test.sh 'platform=tvOS Simulator,name=Apple TV 4K (4th generation) (at 1080p)'
 # Inspect real feeds and a tape's resolved media URL:
 swift run spelunkr-probe --media computer-chronicles
 ```
 
 The Xcode project is checked in. After adding native app or UI-test files, regenerate it with `python3 scripts/generate-project.py` (Python standard library only). The core is a local Swift package; JavaScriptCore executes a pinned, bundled scheduler, with all networking handled by Swift. The app requires no companion computer or server.
+
+The simulator checks run the **Release** configuration used for the IPA. Version 0.1.1 replaces tuple results in guide-loading task groups with concrete result records, fixing a reproduced optimized-build abort in `AsyncTask.completeFuture` during startup. The IPA is small because recordings stream from the Internet Archive and Apple's player frameworks are supplied by tvOS; no video recordings or speech models are bundled.
 
 See [PROVENANCE.md](PROVENANCE.md) for source attribution, the scheduler pin, and validation details. This is a native viewing client: website account features, Discord login, submissions, and the site's non-viewing pages are not implemented.

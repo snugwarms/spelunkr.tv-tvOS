@@ -13,7 +13,6 @@ struct PlayerSurface: UIViewControllerRepresentable {
     }
     func updateUIViewController(_ host: PlayerHostController, context: Context) { host.configure(model) }
 }
-
 final class PlayerHostController: UIViewController, AVPlayerViewControllerDelegate {
     private let logger = Logger(subsystem: "tv.spelunkr.community", category: "controls")
     let controller = AVPlayerViewController()
@@ -21,7 +20,7 @@ final class PlayerHostController: UIViewController, AVPlayerViewControllerDelega
     private var observation: NSKeyValueObservation?
     private var controlsVisible = false
     private var wasInteractive = false
-    private var socialHost: UIHostingController<VideoOverlays>?
+    private var socialHost: UIHostingController<CommunityOverlay>?
     private var installedLastState: Bool?
 
     override func viewDidLoad() {
@@ -42,7 +41,7 @@ final class PlayerHostController: UIViewController, AVPlayerViewControllerDelega
         loadViewIfNeeded()
         self.model = model
         if socialHost == nil, let overlay = controller.contentOverlayView {
-            let social = UIHostingController(rootView: VideoOverlays(model: model))
+            let social = UIHostingController(rootView: CommunityOverlay(community: model.community))
             social.view.backgroundColor = .clear
             social.view.isUserInteractionEnabled = false
             addChild(social)
@@ -84,13 +83,7 @@ final class PlayerHostController: UIViewController, AVPlayerViewControllerDelega
             UIAction(title: "Rejoin Live", image: UIImage(systemName: "dot.radiowaves.left.and.right")) { [weak model] _ in model?.resumeLive() },
             UIAction(title: "Last Channel", image: UIImage(systemName: "arrow.left.arrow.right"), attributes: model.canFlipBack ? [] : [.disabled]) { [weak model] _ in model?.flipBack() },
             UIAction(title: "Mini Guide", image: UIImage(systemName: "list.bullet")) { [weak model] _ in model?.openMiniGuide() },
-            UIAction(title: "Program Guide", image: UIImage(systemName: "rectangle.split.3x3")) { [weak model] _ in model?.openFullGuide() },
-            UIAction(title: "Automatic Captions", image: UIImage(systemName: "captions.bubble"),
-                      attributes: model.captions.supportedOS ? [] : [.disabled],
-                      state: model.captions.isEnabled ? .on : .off) { [weak model] action in
-                model?.captions.toggle()
-                action.state = model?.captions.isEnabled == true ? .on : .off
-            }
+            UIAction(title: "Program Guide", image: UIImage(systemName: "rectangle.split.3x3")) { [weak model] _ in model?.openFullGuide() }
             ]
         }
     }
@@ -112,16 +105,5 @@ final class PlayerHostController: UIViewController, AVPlayerViewControllerDelega
     func playerViewController(_ playerViewController: AVPlayerViewController, timeToSeekAfterUserNavigatedFrom oldTime: CMTime, to targetTime: CMTime) -> CMTime {
         guard let plan = model?.playback?.plan else { return targetTime }
         return CMTime(seconds: plan.clampedSeek(targetTime.seconds, at: Date()), preferredTimescale: 1000)
-    }
-}
-
-private struct VideoOverlays: View {
-    @ObservedObject var model: TVModel
-    var body: some View {
-        ZStack {
-            CommunityOverlay(community: model.community)
-            CaptionOverlay(captions: model.captions, community: model.community)
-        }
-        .background(Color.clear)
     }
 }

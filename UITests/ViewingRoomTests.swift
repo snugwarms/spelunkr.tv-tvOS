@@ -1,22 +1,6 @@
 import XCTest
 
 final class ViewingRoomTests: XCTestCase {
-    func testAutomaticCaptionsKeepVideoPlaying() throws {
-        let app = XCUIApplication()
-        app.launchArguments = ["-automaticCaptions", "YES"]
-        app.launch()
-        let video = app.otherElements["videoRegion"]
-        XCTAssertTrue(video.waitForExistence(timeout: 15))
-        expectation(for: NSPredicate(format: "value == %@", "Playing"), evaluatedWith: video)
-        waitForExpectations(timeout: 60)
-        XCUIRemote.shared.press(.menu)
-        let text = app.staticTexts["captionText"]
-        XCTAssertTrue(text.waitForExistence(timeout: 45), "Captions should show transcription, model preparation, or an availability explanation")
-        XCTAssertFalse(text.label.isEmpty)
-        XCTAssertEqual(video.value as? String, "Playing", "Speech setup must not interrupt playback")
-        attach(app, "Automatic captions availability on this Apple TV")
-    }
-
     func testGuideNavigationAndNativeControls() throws {
         let app = XCUIApplication()
         app.launch()
@@ -77,7 +61,7 @@ final class ViewingRoomTests: XCTestCase {
         let live = app.cells["Rejoin Live"]
         XCTAssertTrue(live.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertTrue(app.cells["Last Channel"].exists)
-        XCTAssertTrue(app.cells["Automatic Captions"].exists)
+        XCTAssertFalse(app.cells["Automatic Captions"].exists)
         attach(app, "Native tvOS player controls")
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(live.waitForNonExistence(timeout: 5))

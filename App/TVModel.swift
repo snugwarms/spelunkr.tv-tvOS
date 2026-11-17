@@ -5,12 +5,23 @@ import OSLog
 import SpelunkrCore
 import SwiftUI
 
+// Concrete result metadata avoids a reproduced Release-only task completion abort with tuples.
+private struct GuideLoadResult: Sendable {
+    let id: String
+    let entry: GuideEntry?
+    let error: String?
+}
+
+private struct ScheduleLoadResult: Sendable {
+    let id: String
+    let programs: [Program]
+}
+
 @MainActor
 final class TVModel: ObservableObject {
     private let logger = Logger(subsystem: "tv.spelunkr.community", category: "playback")
     let player = AVPlayer()
     let community = CommunityPlayback()
-    let captions = LiveCaptions()
     private let audioPlayer = AVPlayer()
     private let service = BroadcastService()
     @Published private(set) var channels: [Channel] = []
@@ -106,16 +117,16 @@ final class TVModel: ObservableObject {
             guideError = nil
             let at = Date(), service = service
             // A failed channel keeps its row and retries at the next refresh.
-            await withTaskGroup(of: (String, GuideEntry?, String?).self) { group in
+            await withTaskGroup(of: GuideLoadResult.self) { group in
                 for entry in channels {
                     group.addTask {
-                        do { return (entry.id, try await service.guide(channel: entry, at: at), nil) }
-                        catch { return (entry.id, nil, error.localizedDescription) }
+                        do { return GuideLoadResult(id: entry.id, entry: try await service.guide(channel: entry, at: at), error: nil) }
+                        catch { return GuideLoadResult(id: entry.id, entry: nil, error: error.localizedDescription) }
                     }
                 }
-                for await (id, result, message) in group {
-                    if let result { guide[id] = result; channelErrors[id] = nil }
-                    else { channelErrors[id] = message }
+                for await result in group {
+                    if let entry = result.entry { guide[result.id] = entry; channelErrors[result.id] = nil }
+                    else { channelErrors[result.id] = result.error }
                 }
             }
             if let current = channel {
@@ -142,7 +153,6 @@ final class TVModel: ObservableObject {
         }
         if resetRetry { retryCount = 0 }
         player.pause(); audioPlayer.pause()
-        captions.bind(nil)
         player.replaceCurrentItem(with: nil); audioPlayer.replaceCurrentItem(with: nil)
         clearObservers()
         playback = nil; error = nil; isTuning = true; usedFallback = false
@@ -190,7 +200,6 @@ final class TVModel: ObservableObject {
         }
         item.preferredForwardBufferDuration = 8
         player.replaceCurrentItem(with: item)
-        captions.bind(item)
         isBuffering = true
         statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             Task { @MainActor [weak self] in
@@ -416,14 +425,14 @@ final class TVModel: ObservableObject {
         isLoadingSchedule = true
         var rows: [String: [Program]] = [:]
         let service = service
-        await withTaskGroup(of: (String, [Program]).self) { group in
+        await withTaskGroup(of: ScheduleLoadResult.self) { group in
             for channel in channels {
                 group.addTask {
                     let programs = (try? await service.timeline(channel: channel, start: at, end: at.addingTimeInterval(7200))) ?? []
-                    return (channel.id, programs)
+                    return ScheduleLoadResult(id: channel.id, programs: programs)
                 }
             }
-            for await (id, programs) in group { rows[id] = programs }
+            for await result in group { rows[result.id] = result.programs }
         }
         guard scheduleRequest == token else { return }
         schedule = rows

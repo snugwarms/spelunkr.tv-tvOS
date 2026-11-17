@@ -57,6 +57,53 @@ final class BroadcastServiceTests: XCTestCase {
         do { _ = try await service.lineup(); XCTFail("Expected unsupported engine") }
         catch BroadcastError.unsupportedEngine(let version) { XCTAssertEqual(version, 6) }
     }
+
+    func testConcurrentGuideReadersShareFetchAndRecoverAfterFailure() async throws {
+        let requests = AssetRequestCounter()
+        let manifest = Data("""
+        {"engine":5,"items":[{"id":"tape","title":"Tape","duration":3600,"mp4":"tape.mp4"}]}
+        """.utf8)
+        func respond(status: Int) {
+            BroadcastMockProtocol.handler = { request in
+                if request.url!.lastPathComponent == "lineup.json" { return (200, Self.lineup) }
+                requests.increment()
+                // Keep the response pending until the other guide readers have joined it.
+                Thread.sleep(forTimeInterval: 0.1)
+                return (status, manifest)
+            }
+        }
+        respond(status: 503)
+        let service = BroadcastService(session: session(), roots: [URL(string: "https://data.example/")!])
+        let lineup = try await service.lineup()
+        let channel = try XCTUnwrap(lineup.availableChannels.first)
+        func readTogether() async -> [Bool] {
+            await withTaskGroup(of: Bool.self) { group in
+                for _ in 0..<18 {
+                    group.addTask {
+                        do { return try await service.guide(channel: channel, at: Date(timeIntervalSince1970: 1000)).current.id == "tape" }
+                        catch { return false }
+                    }
+                }
+                var values: [Bool] = []
+                for await value in group { values.append(value) }
+                return values
+            }
+        }
+        let failed = await readTogether()
+        XCTAssertEqual(failed, Array(repeating: false, count: 18))
+        XCTAssertEqual(requests.value, 1, "All readers must receive the same failed fetch")
+        respond(status: 200)
+        let recovered = await readTogether()
+        XCTAssertEqual(recovered, Array(repeating: true, count: 18))
+        XCTAssertEqual(requests.value, 2, "A failed shared fetch must clear so the next attempt can succeed")
+    }
+}
+
+private final class AssetRequestCounter {
+    private let lock = NSLock()
+    private var count = 0
+    func increment() { lock.lock(); count += 1; lock.unlock() }
+    var value: Int { lock.lock(); defer { lock.unlock() }; return count }
 }
 
 private final class BroadcastMockProtocol: URLProtocol {
