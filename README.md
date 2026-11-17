@@ -6,6 +6,8 @@ A native, independent tvOS client for [spelunkr.tv](https://spelunkr.tv). It tun
 
 Download the unsigned Apple TV IPA from [GitHub Releases](https://github.com/snugwarms/spelunkr.tv-tvOS/releases). Sign it for your Apple TV before installing.
 
+See the [network request report](docs/NETWORK.md) for measured request counts, destinations, caching, and the reduced polling policy being prepared for 0.1.2. Current development requests are tracked in [TODO.md](TODO.md).
+
 ![Full program guide with the current channel in the top right](docs/screenshots/full-guide.png)
 
 ## The viewing layout

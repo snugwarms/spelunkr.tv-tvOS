@@ -1,0 +1,162 @@
+{
+  "build": "0.1.2 development candidate, lower-polling policy",
+  "device": "Apple TV 1080p simulator, tvOS 26",
+  "scenario": "Computer Chronicles, foreground playback, both community overlays on, automatic captions off",
+  "method": "URLSessionTaskMetrics network/cache transactions plus AVPlayerItemAccessLog media counters; response bodies and headers are not logged",
+  "samples": {
+    "cold_start_and_watch": {
+      "durationSeconds": 547.513,
+      "apiByHost": {
+        "data.spelunkr.tv": {
+          "networkTransactions": 42,
+          "localCacheTransactions": 1,
+          "receivedResponseBodyBytes": 1085334,
+          "paths": {
+            "/lineup.json": 3,
+            "/manifests/late-nite-local/v21.json": 1,
+            "/manifests/syndicate/v28.json": 1,
+            "/manifests/primetime/v26.json": 1,
+            "/manifests/saturday-morning/v25.json": 1,
+            "/platform/95999340c48fb6d6.json": 1,
+            "/manifests/computer-chronicles/v18.json": 1,
+            "/manifests/open-mic/v25.json": 1,
+            "/manifests/library-card/v21.json": 1,
+            "/manifests/happy-trees/v14.json": 1,
+            "/manifests/orange-soda/v25.json": 1,
+            "/manifests/nature-preserve/v20.json": 1,
+            "/manifests/radio-active-tv/v19.json": 1,
+            "/manifests/unpaid-programming/v45.json": 1,
+            "/manifests/final-frontier/v29.json": 1,
+            "/manifests/unpaid-programming/v46.json": 1,
+            "/manifests/kersplat/v25.json": 1,
+            "/manifests/latchkey-tv/v34.json": 1,
+            "/platform/2051023bbbf18018.json": 1,
+            "/manifests/rocket-punch/v12.json": 1,
+            "/manifests/latchkey-tv/v35.json": 1,
+            "/manifests/ovatv/v32.json": 1,
+            "/manifests/toonertia/v24.json": 1,
+            "/manifests/late-nite-swimclub/v31.json": 1,
+            "/manifests/homeroom/v25.json": 1,
+            "/manifests/mandatory-viewing/v13.json": 1,
+            "/manifests/warp-zone/v14.json": 1,
+            "/manifests/fallout-shelter/v18.json": 1,
+            "/manifests/dusty-trails/v22.json": 1,
+            "/manifests/gumshoe/v25.json": 1,
+            "/manifests/graveyard-shift/v23.json": 1,
+            "/manifests/daily-dread/v26.json": 1,
+            "/manifests/it-came-from/v24.json": 1,
+            "/manifests/ray-gun/v22.json": 1,
+            "/manifests/signpost/v25.json": 1,
+            "/manifests/waku-waku/v13.json": 1,
+            "/manifests/henshin/v31.json": 1,
+            "/manifests/rubber-hose/v31.json": 1,
+            "/manifests/meddling-kids/v25.json": 1,
+            "/manifests/suplex/v29.json": 1,
+            "/manifests/vacation-slides/v21.json": 1
+          }
+        },
+        "archive.org": {
+          "networkTransactions": 1,
+          "localCacheTransactions": 0,
+          "receivedResponseBodyBytes": 3870,
+          "paths": {
+            "/metadata/<tape>": 1
+          }
+        },
+        "jbuopkuluyfjwgsrigry.supabase.co": {
+          "networkTransactions": 20,
+          "localCacheTransactions": 0,
+          "receivedResponseBodyBytes": 8174,
+          "paths": {
+            "/rest/v1/reactions": 10,
+            "/rest/v1/comments": 10
+          }
+        }
+      },
+      "playerAccessLog": {
+        "reportedMediaRequests": 60,
+        "reportedBytesTransferred": 155255390,
+        "hosts": [
+          "dn710808.ca.archive.org"
+        ]
+      }
+    },
+    "warm_reopen": {
+      "durationSeconds": 124.038,
+      "apiByHost": {
+        "data.spelunkr.tv": {
+          "networkTransactions": 1,
+          "localCacheTransactions": 41,
+          "receivedResponseBodyBytes": 0,
+          "paths": {
+            "/lineup.json": 2,
+            "/manifests/saturday-morning/v25.json": 1,
+            "/manifests/syndicate/v28.json": 1,
+            "/manifests/late-nite-local/v21.json": 1,
+            "/manifests/primetime/v26.json": 1,
+            "/platform/95999340c48fb6d6.json": 1,
+            "/manifests/happy-trees/v14.json": 1,
+            "/manifests/computer-chronicles/v18.json": 1,
+            "/manifests/library-card/v21.json": 1,
+            "/manifests/open-mic/v25.json": 1,
+            "/manifests/nature-preserve/v20.json": 1,
+            "/manifests/unpaid-programming/v45.json": 1,
+            "/manifests/radio-active-tv/v19.json": 1,
+            "/manifests/orange-soda/v25.json": 1,
+            "/manifests/latchkey-tv/v34.json": 1,
+            "/manifests/unpaid-programming/v46.json": 1,
+            "/manifests/latchkey-tv/v35.json": 1,
+            "/manifests/kersplat/v25.json": 1,
+            "/manifests/final-frontier/v29.json": 1,
+            "/manifests/rocket-punch/v12.json": 1,
+            "/manifests/ovatv/v32.json": 1,
+            "/platform/2051023bbbf18018.json": 1,
+            "/manifests/toonertia/v24.json": 1,
+            "/manifests/late-nite-swimclub/v31.json": 1,
+            "/manifests/homeroom/v25.json": 1,
+            "/manifests/warp-zone/v14.json": 1,
+            "/manifests/fallout-shelter/v18.json": 1,
+            "/manifests/mandatory-viewing/v13.json": 1,
+            "/manifests/gumshoe/v25.json": 1,
+            "/manifests/dusty-trails/v22.json": 1,
+            "/manifests/it-came-from/v24.json": 1,
+            "/manifests/daily-dread/v26.json": 1,
+            "/manifests/ray-gun/v22.json": 1,
+            "/manifests/graveyard-shift/v23.json": 1,
+            "/manifests/waku-waku/v13.json": 1,
+            "/manifests/signpost/v25.json": 1,
+            "/manifests/henshin/v31.json": 1,
+            "/manifests/rubber-hose/v31.json": 1,
+            "/manifests/suplex/v29.json": 1,
+            "/manifests/meddling-kids/v25.json": 1,
+            "/manifests/vacation-slides/v21.json": 1
+          }
+        },
+        "archive.org": {
+          "networkTransactions": 2,
+          "localCacheTransactions": 2,
+          "receivedResponseBodyBytes": 3870,
+          "paths": {
+            "/metadata/<tape>": 4
+          }
+        },
+        "jbuopkuluyfjwgsrigry.supabase.co": {
+          "networkTransactions": 6,
+          "localCacheTransactions": 0,
+          "receivedResponseBodyBytes": 555,
+          "paths": {
+            "/rest/v1/reactions": 3,
+            "/rest/v1/comments": 3
+          }
+        }
+      },
+      "playerAccessLog": {
+        "reportedMediaRequests": 19,
+        "reportedBytesTransferred": 56914524,
+        "hosts": [
+          "dn710808.ca.archive.org"
+        ]
+      }
+    }
+  }
+}
