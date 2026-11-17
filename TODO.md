@@ -39,7 +39,7 @@ This checklist tracks app requests and releases. Items are checked only when imp
 - [x] Show a single subtitle control: use the native menu when subtitles are available, and the app's automatic-caption toggle otherwise. Keep its state current. Native-track and fallback-control checks passed.
 - [x] Save native subtitle On/Off, language, and generated/embedded preference, and restore it after closing/reopening, channel changes, and background return. Native language/Off restoration on a new player item and fallback On/Off across actual app termination/relaunch passed.
 - [x] Verify subtitle toggling and persistence in Release (**26 core tests and six simulator checks passed**) and build and validate the unsigned arm64 IPA, version 0.1.4 build 5. Actual generated transcription still needs hardware confirmation.
-- [ ] Publish source plus hotfix assets. Local IPA: `build/releases/0.1.4/Spelunkr-tvOS-unsigned.ipa`.
+- [x] Publish source plus hotfix assets. [Version 0.1.4](https://github.com/snugwarms/spelunkr.tv-tvOS/releases/tag/v0.1.4) is live; uploads and the IPA checksum were verified. Local IPA: `build/releases/0.1.4/Spelunkr-tvOS-unsigned.ipa`.
 
 ## Preserve existing behavior
 
