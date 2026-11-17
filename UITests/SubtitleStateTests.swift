@@ -9,13 +9,13 @@ final class SubtitleStateTests: XCTestCase {
         let group: AVMediaSelectionGroup
     }
 
-    private func preparedPlayer(_ captions: LiveCaptions) async throws -> PreparedPlayer {
+    private func preparedPlayer(_ captions: LiveCaptions, allowsAudioProcessing: Bool = true) async throws -> PreparedPlayer {
         let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "subtitles", withExtension: "mp4"))
         let item = AVPlayerItem(url: url)
         let loadedGroup = try await item.asset.loadMediaSelectionGroup(for: .legible)
         let group = try XCTUnwrap(loadedGroup)
         let player = AVPlayer(playerItem: item)
-        captions.bind(item)
+        captions.bind(item, allowsAudioProcessing: allowsAudioProcessing)
         for _ in 0..<250 {
             if item.status != .unknown { break }
             try await Task.sleep(for: .milliseconds(20))
@@ -84,5 +84,45 @@ final class SubtitleStateTests: XCTestCase {
         XCTAssertFalse(defaults.bool(forKey: "automaticCaptions"))
         captions.bind(nil)
         withExtendedLifetime(source.player) {}
+    }
+
+    func testCompatibilityPlaybackKeepsNativeSubtitlesWithoutAnAudioTap() async throws {
+        let defaults = isolatedDefaults()
+        defaults.set(true, forKey: "automaticCaptions")
+        let captions = LiveCaptions(defaults: defaults)
+        let source = try await preparedPlayer(captions, allowsAudioProcessing: false)
+        XCTAssertNotNil(source.item.currentMediaSelection.selectedMediaOption(in: source.group))
+        XCTAssertNil(source.item.audioMix)
+        XCTAssertTrue(captions.isEnabled)
+        XCTAssertTrue(defaults.bool(forKey: "automaticCaptions"))
+        captions.bind(nil)
+        withExtendedLifetime(source.player) {}
+    }
+
+    func testCompatibilityPlaybackDoesNotRecreateTheSpeechAudioTap() async throws {
+        let defaults = isolatedDefaults()
+        defaults.set(true, forKey: "automaticCaptions")
+        let captions = LiveCaptions(defaults: defaults)
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "no-subtitles", withExtension: "mp4"))
+        let item = AVPlayerItem(url: url)
+        let player = AVPlayer(playerItem: item)
+        captions.bind(item, allowsAudioProcessing: false)
+        for _ in 0..<250 {
+            if item.status != .unknown { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(item.status, .readyToPlay)
+        captions.playbackReady()
+        for _ in 0..<250 {
+            if captions.status?.contains("compatibility") == true { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(captions.status?.contains("compatibility") == true)
+        XCTAssertNil(item.audioMix)
+        XCTAssertTrue(captions.isEnabled, "Keep the preference for later recordings")
+        captions.toggle()
+        XCTAssertFalse(captions.isEnabled, "The viewer can still turn captions off")
+        captions.bind(nil)
+        withExtendedLifetime(player) {}
     }
 }

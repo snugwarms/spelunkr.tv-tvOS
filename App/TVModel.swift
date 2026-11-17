@@ -20,7 +20,7 @@ private struct ScheduleLoadResult: Sendable {
 @MainActor
 final class TVModel: ObservableObject {
     private let logger = Logger(subsystem: "tv.spelunkr.community", category: "playback")
-    let player = AVPlayer()
+    @Published private(set) var player = AVPlayer()
     let community = CommunityPlayback()
     let captions = LiveCaptions()
     @Published private(set) var normalizesVolume = UserDefaults.standard.object(forKey: "normalizesVolume") as? Bool ?? true
@@ -39,6 +39,8 @@ final class TVModel: ObservableObject {
     @Published private(set) var isPaused = false
     @Published private(set) var error: String?
     @Published private(set) var playbackFailure: PlaybackFailureInfo?
+    @Published private(set) var usesCompatibilityPlayback = false
+    @Published private(set) var compatibilityNotice: String?
     @Published private(set) var guideError: String?
     @Published private(set) var isRefreshing = false
     @Published private(set) var favoriteIDs: Set<String>
@@ -65,6 +67,9 @@ final class TVModel: ObservableObject {
     private var watchdogTask: Task<Void, Never>?
     private var watchdogID = UUID()
     private var videoStartupTask: Task<Void, Never>?
+    private var compatibilityNoticeTask: Task<Void, Never>?
+    private var compatibilityAttempted = false
+    private var currentMediaURL: URL?
     private var videoAttempt = UUID()
     private var preparedVideoAttempt: UUID?
     private var remainingMediaURLs: [URL] = []
@@ -86,13 +91,7 @@ final class TVModel: ObservableObject {
         self.service = service
         self.mediaURLTransform = mediaURLTransform
         favoriteIDs = Set(UserDefaults.standard.stringArray(forKey: "favoriteChannels") ?? [])
-        player.automaticallyWaitsToMinimizeStalling = true
-        liveBoundaryObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.1, preferredTimescale: 1000), queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.enforceLiveBoundary() }
-        }
-        controlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
-            Task { @MainActor [weak self] in self?.bufferingChanged() }
-        }
+        configureVideoPlayerObservers()
         let commands = MPRemoteCommandCenter.shared()
         commands.playCommand.addTarget { [weak self] _ in Task { @MainActor [weak self] in self?.resumePlayback() }; return .success }
         commands.pauseCommand.addTarget { [weak self] _ in Task { @MainActor [weak self] in self?.pause(source: "system remote command") }; return .success }
@@ -103,6 +102,31 @@ final class TVModel: ObservableObject {
         audioRouteObservation = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.configureStereoOutput() }
         }
+    }
+
+    private func configureVideoPlayerObservers() {
+        player.automaticallyWaitsToMinimizeStalling = true
+        liveBoundaryObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.1, preferredTimescale: 1000), queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.enforceLiveBoundary() }
+        }
+        controlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in self?.bufferingChanged() }
+        }
+    }
+
+    private func replaceFailedVideoPlayer() {
+        let previous = player
+        controlObservation = nil
+        if let liveBoundaryObserver { previous.removeTimeObserver(liveBoundaryObserver) }
+        liveBoundaryObserver = nil
+        previous.replaceCurrentItem(with: nil)
+        let replacement = AVPlayer()
+        replacement.isMuted = previous.isMuted
+        replacement.volume = previous.volume
+        replacement.allowsExternalPlayback = previous.allowsExternalPlayback
+        player = replacement
+        configureVideoPlayerObservers()
+        configureAudio()
     }
 
     var orderedChannels: [Channel] {
@@ -167,6 +191,12 @@ final class TVModel: ObservableObject {
         logger.debug("Tune \(selected.id, privacy: .public)")
         tuneTask?.cancel(); transitionTask?.cancel(); recoveryTask?.cancel(); watchdogTask?.cancel()
         videoStartupTask?.cancel()
+        compatibilityNoticeTask?.cancel()
+        compatibilityNoticeTask = nil
+        usesCompatibilityPlayback = false
+        compatibilityNotice = nil
+        compatibilityAttempted = false
+        currentMediaURL = nil
         videoAttempt = UUID()
         let token = UUID()
         generation = token
@@ -215,7 +245,8 @@ final class TVModel: ObservableObject {
         }
     }
 
-    private func installVideo(_ url: URL, token: UUID) {
+    private func installVideo(_ url: URL, token: UUID, freshPlayer: Bool = false) {
+        currentMediaURL = url
         videoAttempt = UUID()
         let attempt = videoAttempt
         videoStartupTask?.cancel()
@@ -227,6 +258,7 @@ final class TVModel: ObservableObject {
         captions.bind(nil)
         playbackAudioTap?.stop(); playbackAudioTap = nil
         player.pause()
+        if freshPlayer { replaceFailedVideoPlayer() }
         let item = AVPlayerItem(url: mediaURLTransform(url))
         item.allowedAudioSpatializationFormats = []
         if let plan = playback?.plan {
@@ -240,7 +272,7 @@ final class TVModel: ObservableObject {
         }
         item.preferredForwardBufferDuration = 8
         player.replaceCurrentItem(with: item)
-        captions.bind(item)
+        captions.bind(item, allowsAudioProcessing: !usesCompatibilityPlayback)
         isBuffering = true
         statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             Task { @MainActor [weak self] in
@@ -252,7 +284,7 @@ final class TVModel: ObservableObject {
                     videoStartupTask?.cancel()
                     videoStartupTask = Task { [weak self] in
                         guard let self else { return }
-                        await prepareAudioProcessing(item, token: token)
+                        if !usesCompatibilityPlayback { await prepareAudioProcessing(item, token: token) }
                         guard !Task.isCancelled, generation == token, videoAttempt == attempt,
                               player.currentItem === item, foreground else { return }
                         let size = item.presentationSize
@@ -266,8 +298,9 @@ final class TVModel: ObservableObject {
                 }
             }
         }
-        failedObservation = NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.videoFailed(token: token, attempt: attempt, reason: "Playback stopped") }
+        failedObservation = NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { [weak self] notification in
+            let failure = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? NSError
+            Task { @MainActor [weak self] in self?.videoFailed(token: token, attempt: attempt, reason: "Playback stopped", notificationError: failure) }
         }
         endedObservation = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in
@@ -298,23 +331,32 @@ final class TVModel: ObservableObject {
                     return
                 }
                 error = nil
+                playbackFailure = nil
                 internalPlayerChange = false
                 if !isPaused { player.playImmediately(atRate: 1); captions.playbackReady() }
             }
         }
     }
 
-    private func videoFailed(token: UUID, attempt: UUID, reason: String) {
+    private func videoFailed(token: UUID, attempt: UUID, reason: String, notificationError: Error? = nil) {
         guard generation == token, videoAttempt == attempt, foreground else { return }
         stopVideoWatchdog()
         let item = player.currentItem
         let lastEvent = item?.errorLog()?.events.last
         let host = (item?.asset as? AVURLAsset)?.url.host ?? "Archive"
-        let info = PlaybackFailureInfo.make(error: item?.error, logDomain: lastEvent?.errorDomain,
+        let info = PlaybackFailureInfo.make(error: notificationError ?? item?.error ?? player.error, logDomain: lastEvent?.errorDomain,
                                             logStatus: lastEvent?.errorStatusCode, logComment: lastEvent?.errorComment, reason: reason, host: host,
                                             retryAfter: min(30, 5 * (retryCount + 1)))
         logger.error("Video recovery: \(info.details, privacy: .public), channel=\(self.channel?.id ?? "", privacy: .public)")
-        if !remainingMediaURLs.isEmpty {
+        playbackFailure = info
+        // A playable stream can fail after the optional audio mix is installed on real hardware.
+        // Retry it once with the native decoder path before blaming the file or its replicas.
+        if !compatibilityAttempted, item?.audioMix != nil, let url = currentMediaURL {
+            compatibilityAttempted = true
+            usesCompatibilityPlayback = true
+            compatibilityNotice = normalizesVolume ? "Compatibility playback: volume leveling is paused for this recording." : "Using compatibility playback for this recording."
+            installVideo(url, token: token, freshPlayer: true)
+        } else if !remainingMediaURLs.isEmpty {
             installVideo(remainingMediaURLs.removeFirst(), token: token)
         } else {
             isBuffering = false
@@ -331,6 +373,14 @@ final class TVModel: ObservableObject {
             videoHasStarted = true
             isBuffering = false
             captions.playbackReady()
+            if usesCompatibilityPlayback, compatibilityNotice != nil, compatibilityNoticeTask == nil {
+                let token = generation
+                compatibilityNoticeTask = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(8))
+                    guard !Task.isCancelled, let self, generation == token else { return }
+                    compatibilityNotice = nil
+                }
+            }
             stopVideoWatchdog()
         }
         else if player.timeControlStatus == .paused, foreground, !internalPlayerChange, !isTuning, playback?.plan.isVideo == true {
@@ -418,6 +468,7 @@ final class TVModel: ObservableObject {
 
     func togglePause() { isPaused ? resumePlayback() : pause() }
     func toggleNormalization() {
+        guard !usesCompatibilityPlayback else { return }
         normalizesVolume.toggle()
         UserDefaults.standard.set(normalizesVolume, forKey: "normalizesVolume")
         playbackAudioTap?.setNormalization(normalizesVolume)
@@ -476,6 +527,7 @@ final class TVModel: ObservableObject {
             generation = UUID()
             videoAttempt = UUID()
             videoStartupTask?.cancel()
+            compatibilityNoticeTask?.cancel()
             tuneTask?.cancel(); transitionTask?.cancel(); recoveryTask?.cancel(); watchdogTask?.cancel(); refreshTask?.cancel()
             player.pause(); audioPlayer.pause()
             captions.bind(nil)

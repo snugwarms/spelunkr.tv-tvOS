@@ -60,7 +60,16 @@ This checklist tracks app requests and releases. Items are checked only when imp
 - [x] Replace generic No Signal with clearer connection, download-stall, missing-recording, access, and format errors; include retry timing and a smaller diagnostic code/server line. HTTP failures are not mislabeled as unsupported codecs. A genuinely unavailable decoder waits for the next program instead of repeatedly requesting the same file.
 - [x] Pass **35 Release core tests and 16 Release simulator checks**. Recovery tests use the real TVModel with injected feeds and byte transport, not a replacement player implementation. Direct native external access on this development machine remains unavailable; the temporary relay is not part of the app.
 - [x] Build/validate the unsigned arm64 IPA, version 0.1.6 build 7, and publish source plus release assets. [Version 0.1.6](https://github.com/snugwarms/spelunkr.tv-tvOS/releases/tag/v0.1.6) is live; uploads and the IPA checksum were verified. Local IPA: `build/releases/0.1.6/Spelunkr-tvOS-unsigned.ipa`.
-- [ ] Confirm the three reported channels play directly on the user's Apple TV with 0.1.6; the installed version and detailed error line now identify any remaining failure.
+- [x] Record the user's hardware feedback: 0.1.6 did **not** resolve the problem. Mandatory Viewing reported playback stopped with only “archive.org” in the diagnostic line; Unpaid Programming and Late Nite Local also freeze. Some other channels still play. Continue under 0.1.7.
+
+## Version 0.1.7 — playback-stopped follow-up
+
+- [x] Capture the actual error carried in AVPlayerItemFailedToPlayToEndTimeErrorKey instead of discarding it and showing only “Playback stopped.”
+- [x] Retry a failing processed stream once with a fresh player and without the optional audio mix/custom speech tap, preserving stereo output, native subtitles, and the user's saved preferences. Make the temporary volume-leveling limitation visible.
+- [x] Cover Mandatory Viewing, Unpaid Programming, and Late Nite Local in the investigation; some other channels still play on the user's TV. Late Nite Local's sampled Holiday Special is H.264 Main level 3.0 / AAC-LC stereo; Unpaid Programming's sampled Country Collection is H.264 Main level 3.0 / HE-AAC stereo. Both pass the paused-startup/audio-processing/live-seek simulator check through the temporary relay. Direct hardware playback remains unconfirmed.
+- [x] Pass **35 Release core tests and 21 targeted Release simulator checks**: notification-only error handling, fresh-player compatibility recovery with advancing video frames, stale callback isolation, subtitle behavior, delayed startup, manual rewind, errors, and version display. Review the version-footer screenshot and validate the unsigned arm64 IPA, version 0.1.7 build 8; test fixtures and the relay are excluded.
+- [ ] Publish source and verified 0.1.7 release assets.
+- [ ] Confirm direct playback on the user's Apple TV and obtain the actual error code if the recovery workaround does not resolve the freeze.
 
 ## Preserve existing behavior
 

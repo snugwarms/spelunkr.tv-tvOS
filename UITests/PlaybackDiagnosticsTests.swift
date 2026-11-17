@@ -1,7 +1,7 @@
 import AVFoundation
 import XCTest
 
-/// Opt-in network checks for the two recordings reported on 17 November 2026.
+/// Opt-in network checks for recordings reported on 17 November 2026.
 /// Ordinary test runs skip these so they do not repeatedly stream from Archive.
 @MainActor
 final class PlaybackDiagnosticsTests: XCTestCase {
@@ -30,13 +30,21 @@ final class PlaybackDiagnosticsTests: XCTestCase {
         try await checkPlayback("https://dn600208.us.archive.org/0/items/blockbuster-video-training-video/blockbuster%20video%20training%20video.ia.mp4", seek: 60, primeBeforeSeeking: false)
     }
 
+    func testLateNiteLocalHolidaySpecialPausedStartup() async throws {
+        try await checkPlayback("https://dn600203.us.archive.org/0/items/ptvpny-PTV_Presents_-_The_2019_Holiday_Special/PTV_Presents_-_The_2019_Holiday_Special.mp4", seek: 720, primeBeforeSeeking: false)
+    }
+
+    func testUnpaidProgrammingCountryCollectionPausedStartup() async throws {
+        try await checkPlayback("https://ia601607.us.archive.org/21/items/time-life-60s-and-70s-country-infomercials/TIME%20LIFE-%2060%27S%20COUNTRY.mp4", seek: 1200, primeBeforeSeeking: false)
+    }
+
     private func checkPlayback(_ url: String, seek: Double, primeBeforeSeeking: Bool = true) async throws {
         guard ProcessInfo.processInfo.environment["SPELUNKR_LIVE_PLAYBACK_TESTS"] == "1" else {
             throw XCTSkip("Opt-in Archive playback check")
         }
         let sourceURL: URL
         if let proxy = ProcessInfo.processInfo.environment["SPELUNKR_MEDIA_PROXY"] {
-            let name = url.contains("blockbuster") ? "mandatory" : url.contains("RETN-SAP") ? "sons" : url.contains("se1ep10") ? "bad10" : url.contains("Jam_session") ? "open-mic" : url.contains("Influence") ? "warp-zone" : "control"
+            let name = url.contains("Holiday_Special") ? "late-nite-local" : url.contains("COUNTRY") ? "unpaid-programming" : url.contains("blockbuster") ? "mandatory" : url.contains("RETN-SAP") ? "sons" : url.contains("se1ep10") ? "bad10" : url.contains("Jam_session") ? "open-mic" : url.contains("Influence") ? "warp-zone" : "control"
             sourceURL = URL(string: proxy)!.appendingPathComponent("\(name).mp4")
         } else { sourceURL = URL(string: url)! }
         let item = AVPlayerItem(url: sourceURL)

@@ -16,6 +16,7 @@ final class LiveCaptions: ObservableObject {
     private var jumpObserver: NSObjectProtocol?
     private var generation = UUID()
     private var isPlaybackReady = false
+    private var allowsAudioProcessing = true
     private var nativeGroup: AVMediaSelectionGroup?
     private var nativeOption: AVMediaSelectionOption?
     private let defaults: UserDefaults
@@ -42,10 +43,11 @@ final class LiveCaptions: ObservableObject {
         restart()
     }
 
-    func bind(_ item: AVPlayerItem?) {
-        guard self.item !== item else { return }
+    func bind(_ item: AVPlayerItem?, allowsAudioProcessing: Bool = true) {
+        guard self.item !== item || self.allowsAudioProcessing != allowsAudioProcessing else { return }
         stop()
         self.item = item
+        self.allowsAudioProcessing = allowsAudioProcessing
         isPlaybackReady = false
         nativeGroup = nil
         usesNativeSubtitles = false
@@ -117,6 +119,10 @@ final class LiveCaptions: ObservableObject {
                     return
                 }
                 guard isEnabled else { status = nil; return }
+                guard allowsAudioProcessing else {
+                    status = "Automatic captions are unavailable in compatibility playback."
+                    return
+                }
                 guard #available(tvOS 26.0, *) else {
                     status = "Automatic captions require tvOS 26 or later."
                     return

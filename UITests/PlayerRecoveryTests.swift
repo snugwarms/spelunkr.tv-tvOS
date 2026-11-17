@@ -1,5 +1,7 @@
 import AVFoundation
+import Combine
 import SpelunkrCore
+import UIKit
 import XCTest
 
 /// Exercises TVModel itself; the local relay only substitutes the remote transport.
@@ -145,6 +147,53 @@ final class PlayerRecoveryTests: XCTestCase {
         XCTAssertGreaterThan(model.player.currentTime().seconds, 901)
         XCTAssertLessThan(model.player.currentTime().seconds, 910)
         withExtendedLifetime(surface) {}
+    }
+
+    func testNotificationOnlyErrorRetriesOnceWithoutOptionalAudioProcessing() async throws {
+        let (model, attempts) = try makeModel(primaryPath: "sons.mp4")
+        let surface = AVPlayerLayer(player: model.player)
+        defer { model.setActive(false) }
+        await model.start()
+        try await waitForPlayback(model, timeout: 25)
+        let original = try XCTUnwrap(model.player.currentItem)
+        let originalPlayer = model.player
+        XCTAssertNotNil(original.audioMix)
+        let preference = model.normalizesVolume
+        var diagnostics: [String] = []
+        let subscription = model.$playbackFailure.sink { if let info = $0 { diagnostics.append(info.details) } }
+        let failure = NSError(domain: AVFoundationErrorDomain, code: AVError.Code.unknown.rawValue,
+                              userInfo: [NSUnderlyingErrorKey: NSError(domain: NSOSStatusErrorDomain, code: -10868)])
+        // This notification carries an error even though AVPlayerItem.error is nil.
+        XCTAssertNil(original.error)
+        NotificationCenter.default.post(name: .AVPlayerItemFailedToPlayToEndTime, object: original,
+                                        userInfo: [AVPlayerItemFailedToPlayToEndTimeErrorKey: failure])
+        for _ in 0..<100 {
+            if model.usesCompatibilityPlayback { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertTrue(model.usesCompatibilityPlayback)
+        XCTAssertFalse(model.player === originalPlayer, "Do not reuse a potentially failed decoder")
+        try await waitForPlayback(model, timeout: 25)
+        XCTAssertNil(model.player.currentItem?.audioMix, "The clean retry must actually bypass the audio tap")
+        XCTAssertEqual(model.player.currentItem?.allowedAudioSpatializationFormats.rawValue, 0)
+        XCTAssertEqual(model.normalizesVolume, preference, "Compatibility is per recording; preserve the user's setting")
+        XCTAssertEqual(attempts(), ["ia-primary.us.archive.org", "ia-primary.us.archive.org"], "One same-copy retry, before trying another server")
+        XCTAssertTrue(diagnostics.contains { $0.contains("-10868") }, "Retain the error carried only in notification.userInfo")
+        // A queued failure from the abandoned item must not advance to another server.
+        NotificationCenter.default.post(name: .AVPlayerItemFailedToPlayToEndTime, object: original,
+                                        userInfo: [AVPlayerItemFailedToPlayToEndTimeErrorKey: failure])
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(attempts().count, 2)
+        let host = PlayerHostController()
+        host.configure(model)
+        let leveling = try XCTUnwrap(host.controller.transportBarCustomMenuItems.compactMap { $0 as? UIAction }.first { $0.title == "Volume Leveling: Unavailable" })
+        XCTAssertTrue(leveling.attributes.contains(.disabled))
+        XCTAssertEqual(leveling.state, .off)
+        model.tune(try XCTUnwrap(model.channel))
+        try await waitForPlayback(model, timeout: 25)
+        XCTAssertFalse(model.usesCompatibilityPlayback)
+        XCTAssertNotNil(model.player.currentItem?.audioMix)
+        withExtendedLifetime((surface, subscription, host)) {}
     }
 }
 

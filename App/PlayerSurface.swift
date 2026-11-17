@@ -28,6 +28,7 @@ final class PlayerHostController: UIViewController, AVPlayerViewControllerDelega
         let normalizesVolume: Bool
         let captionsEnabled: Bool
         let nativeSubtitles: Bool
+        let compatibilityPlayback: Bool
     }
     private var installedMenuState: MenuState?
 
@@ -98,7 +99,8 @@ final class PlayerHostController: UIViewController, AVPlayerViewControllerDelega
 
     private func updateTransportMenu(_ model: TVModel) {
         let state = MenuState(canFlipBack: model.canFlipBack, normalizesVolume: model.normalizesVolume,
-                              captionsEnabled: model.captions.isEnabled, nativeSubtitles: model.captions.usesNativeSubtitles)
+                              captionsEnabled: model.captions.isEnabled, nativeSubtitles: model.captions.usesNativeSubtitles,
+                              compatibilityPlayback: model.usesCompatibilityPlayback)
         guard installedMenuState != state else { return }
         installedMenuState = state
         var items: [UIMenuElement] = [
@@ -106,13 +108,15 @@ final class PlayerHostController: UIViewController, AVPlayerViewControllerDelega
             UIAction(title: "Last Channel", image: UIImage(systemName: "arrow.left.arrow.right"), attributes: model.canFlipBack ? [] : [.disabled]) { [weak model] _ in model?.flipBack() },
             UIAction(title: "Mini Guide", image: UIImage(systemName: "list.bullet")) { [weak model] _ in model?.openMiniGuide() },
             UIAction(title: "Program Guide", image: UIImage(systemName: "rectangle.split.3x3")) { [weak model] _ in model?.openFullGuide() },
-            UIAction(title: "Volume Leveling", image: UIImage(systemName: "waveform"), state: model.normalizesVolume ? .on : .off) { [weak model] action in
+            UIAction(title: model.usesCompatibilityPlayback ? "Volume Leveling: Unavailable" : "Volume Leveling", image: UIImage(systemName: "waveform"),
+                     attributes: model.usesCompatibilityPlayback ? [.disabled] : [],
+                     state: model.normalizesVolume && !model.usesCompatibilityPlayback ? .on : .off) { [weak model] action in
                 model?.toggleNormalization()
                 action.state = model?.normalizesVolume == true ? .on : .off
             }
         ]
         if !model.captions.usesNativeSubtitles {
-            items.append(UIAction(title: model.captions.isEnabled ? "Subtitles: On" : "Subtitles: Off", image: UIImage(systemName: "captions.bubble"),
+            items.append(UIAction(title: model.captions.isEnabled ? model.usesCompatibilityPlayback ? "Subtitles: On (Unavailable)" : "Subtitles: On" : "Subtitles: Off", image: UIImage(systemName: "captions.bubble"),
                       attributes: model.captions.supportedOS ? [] : [.disabled],
                       state: model.captions.isEnabled ? .on : .off) { [weak model] action in
                 model?.captions.toggle()
@@ -153,6 +157,15 @@ private struct VideoOverlays: View {
         ZStack {
             CommunityOverlay(community: model.community)
             CaptionOverlay(captions: model.captions, community: model.community)
+            if let notice = model.compatibilityNotice {
+                VStack {
+                    Text(notice).font(.system(size: 19, weight: .medium)).multilineTextAlignment(.center)
+                        .padding(14).foregroundStyle(.white).background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
+                        .padding(.horizontal, 30).padding(.top, 30)
+                        .accessibilityIdentifier("compatibilityNotice")
+                    Spacer()
+                }
+            }
         }
         .background(Color.clear)
     }
