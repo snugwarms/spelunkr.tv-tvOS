@@ -1,4 +1,6 @@
-# Spelunkr for Apple TV
+# Spelunkr for Apple TV — UNOFFICIAL
+
+**This is an UNOFFICIAL third-party app. It is not made by, affiliated with, or endorsed by the creator of Spelunkr.tv. For the official service, visit [spelunkr.tv](https://spelunkr.tv).**
 
 A native, independent tvOS client for [spelunkr.tv](https://spelunkr.tv). It tunes into the same synchronized broadcasts, plays Internet Archive tapes through AVPlayer, and puts the guide beside the picture.
 
