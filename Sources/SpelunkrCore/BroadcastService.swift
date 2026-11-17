@@ -134,6 +134,12 @@ public actor BroadcastService {
     private static func fetch(_ url: URL, session: URLSession, policy: URLRequest.CachePolicy = .useProtocolCachePolicy) async throws -> Data {
         var request = URLRequest(url: url, cachePolicy: policy, timeoutInterval: 12)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        // The public broadcast hosts require the site's origin, just as their browser client sends it.
+        // Do not forward these headers to Archive metadata or other hosts.
+        if ["data.spelunkr.tv", "spelunkr.tv"].contains(url.host?.lowercased() ?? "") {
+            request.setValue("https://spelunkr.tv", forHTTPHeaderField: "Origin")
+            request.setValue("https://spelunkr.tv/", forHTTPHeaderField: "Referer")
+        }
         await requestLimiter.acquire()
         let data: Data, response: URLResponse
         do {

@@ -58,6 +58,35 @@ final class BroadcastServiceTests: XCTestCase {
         catch BroadcastError.unsupportedEngine(let version) { XCTAssertEqual(version, 6) }
     }
 
+    func testBroadcastOriginHeadersPreventForbiddenResponsesWithoutLeakingToArchive() async throws {
+        let requests = AssetRequestCounter()
+        BroadcastMockProtocol.handler = { request in
+            requests.increment()
+            if request.url?.host == "archive.org" {
+                XCTAssertNil(request.value(forHTTPHeaderField: "Origin"))
+                XCTAssertNil(request.value(forHTTPHeaderField: "Referer"))
+                return (200, Data("""
+                {"server":"ia800100.us.archive.org","dir":"/12/items/tape","files":[{"name":"tape.mp4","format":"h.264"}]}
+                """.utf8))
+            }
+            // Model the observed rejection when the site origin is missing.
+            guard request.value(forHTTPHeaderField: "Origin") == "https://spelunkr.tv",
+                  request.value(forHTTPHeaderField: "Referer") == "https://spelunkr.tv/" else { return (403, Data()) }
+            if request.url?.lastPathComponent == "lineup.json" { return (200, Self.lineup) }
+            return (200, Data("""
+            {"engine":5,"items":[{"id":"tape","title":"Tape","duration":3600,"mp4":"tape.mp4"}]}
+            """.utf8))
+        }
+        for host in ["data.spelunkr.tv", "spelunkr.tv"] {
+            let service = BroadcastService(session: session(), roots: [URL(string: "https://\(host)/")!])
+            let lineup = try await service.lineup()
+            let channel = try XCTUnwrap(lineup.availableChannels.first)
+            let resolved = try await service.tune(channel: channel, at: Date(timeIntervalSince1970: 1000))
+            XCTAssertEqual(resolved.mediaURL?.host, "ia800100.us.archive.org")
+        }
+        XCTAssertEqual(requests.value, 6, "No extra probe or polling requests are needed")
+    }
+
     func testConcurrentGuideReadersShareFetchAndRecoverAfterFailure() async throws {
         let requests = AssetRequestCounter()
         let manifest = Data("""

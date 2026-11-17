@@ -88,10 +88,14 @@ swift test -c release
 ./scripts/test.sh 'platform=tvOS Simulator,name=Apple TV 4K (4th generation) (at 1080p)'
 # Inspect real feeds and a tape's resolved media URL:
 swift run spelunkr-probe --media computer-chronicles
+# Diagnose only the requested channels:
+swift run spelunkr-probe --media open-mic --media warp-zone
 ```
 
 The Xcode project is checked in. After adding native app or UI-test files, regenerate it with `python3 scripts/generate-project.py` (Python standard library only). The core is a local Swift package; JavaScriptCore executes a pinned, bundled scheduler, with all networking handled by Swift. The app requires no companion computer or server.
 
 The simulator checks run the **Release** configuration used for the IPA. Version 0.1.1 replaces tuple results in guide-loading task groups with concrete result records, fixing a reproduced optimized-build abort in `AsyncTask.completeFuture` during startup. The IPA is small because recordings stream from the Internet Archive and Apple's player frameworks are supplied by tvOS; no video recordings or speech models are bundled.
+
+Version 0.1.5 supplies the website's required Origin and Referer on requests to Spelunkr's broadcast hosts, fixing reproduced HTTP 403 responses for the Open Mic and Warp Zone manifests. These headers are restricted to Spelunkr hosts, and no polling or probe requests are added. The diagnostic CLI can inspect several selected channels in one run without loading the entire guide. Archive playback checks in `PlaybackDiagnosticsTests` are opt-in with the `TEST_RUNNER_SPELUNKR_LIVE_PLAYBACK_TESTS=1` environment variable before `xcodebuild`, so ordinary test runs do not stream those recordings.
 
 See [PROVENANCE.md](PROVENANCE.md) for source attribution, the scheduler pin, and validation details. This is a native viewing client: website account features, Discord login, submissions, and the site's non-viewing pages are not implemented.

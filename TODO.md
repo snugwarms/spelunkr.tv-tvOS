@@ -41,6 +41,15 @@ This checklist tracks app requests and releases. Items are checked only when imp
 - [x] Verify subtitle toggling and persistence in Release (**26 core tests and six simulator checks passed**) and build and validate the unsigned arm64 IPA, version 0.1.4 build 5. Actual generated transcription still needs hardware confirmation.
 - [x] Publish source plus hotfix assets. [Version 0.1.4](https://github.com/snugwarms/spelunkr.tv-tvOS/releases/tag/v0.1.4) is live; uploads and the IPA checksum were verified. Local IPA: `build/releases/0.1.4/Spelunkr-tvOS-unsigned.ipa`.
 
+## Version 0.1.5 — Open Mic / Warp Zone investigation
+
+- [x] Identify the sampled tapes: Open Mic's “Jam Session in Judique” (`teli1ns-Jam_session_in_Judique1991`) and Warp Zone's “Bad Influence!: Ecco, Lemmings” (`bad_influence_se1ep9`), observed at 20:42 UTC on 17 November. Both files and nonzero byte-range requests were available; both use H.264/AAC.
+- [x] Reproduce HTTP 403 on both channel manifests without site-origin headers and HTTP 200 with them. Supply Origin/Referer only on Spelunkr broadcast requests. Regression checks cover both hosts, Archive header isolation, and unchanged request counts. **27 Release core tests passed.** The frozen network report remains unchanged.
+- [x] Check native playback of the two exact recordings and a known-good control, including live-position seeking and normalization: **three Release simulator checks passed through a temporary local relay**. Direct native external connections failed with network-unavailable errors even for the control; these runs do not establish direct-device playback. No relay is included in the app.
+- [x] Improve the diagnostic CLI so requested channels can be checked together without fetching all channel guides; add opt-in, bounded live-media checks that ordinary tests skip.
+- [ ] Build and validate the unsigned Apple TV IPA and publish source plus version 0.1.5 assets.
+- [ ] Confirm the reported channels play on the user's physical Apple TV after installing the feed-access fix; check different tape titles if the sampled recordings do not match the report.
+
 ## Preserve existing behavior
 
 - Full-height, original-aspect video beside or under the mini guide; top-right preview in the full guide.
