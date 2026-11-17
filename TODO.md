@@ -47,7 +47,7 @@ This checklist tracks app requests and releases. Items are checked only when imp
 - [x] Reproduce HTTP 403 on both channel manifests without site-origin headers and HTTP 200 with them. Supply Origin/Referer only on Spelunkr broadcast requests. Regression checks cover both hosts, Archive header isolation, and unchanged request counts. **27 Release core tests passed.** The frozen network report remains unchanged.
 - [x] Check native playback of the two exact recordings and a known-good control, including live-position seeking and normalization: **three Release simulator checks passed through a temporary local relay**. Direct native external connections failed with network-unavailable errors even for the control; these runs do not establish direct-device playback. No relay is included in the app.
 - [x] Improve the diagnostic CLI so requested channels can be checked together without fetching all channel guides; add opt-in, bounded live-media checks that ordinary tests skip.
-- [ ] Build and validate the unsigned Apple TV IPA and publish source plus version 0.1.5 assets.
+- [x] Build and validate the unsigned arm64 Apple TV IPA, version 0.1.5 build 6, and publish source plus release assets. [Version 0.1.5](https://github.com/snugwarms/spelunkr.tv-tvOS/releases/tag/v0.1.5) is live; uploads and the IPA checksum were verified. Local IPA: `build/releases/0.1.5/Spelunkr-tvOS-unsigned.ipa`.
 - [ ] Confirm the reported channels play on the user's physical Apple TV after installing the feed-access fix; check different tape titles if the sampled recordings do not match the report.
 
 ## Preserve existing behavior
